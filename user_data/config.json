@@ -1,0 +1,100 @@
+{
+    "max_open_trades": 20,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 1,
+    "fiat_display_currency": "USD",
+    "timeframe": "1m",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    "cancel_open_orders_on_exit": false,
+    "trading_mode": "spot",
+    "margin_mode": "",
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 10,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    "exchange": {
+        "name": "kucoin",
+        "key": "",
+        "secret": "",
+        "password": "",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 60000,
+            "urls": {
+                "api": {
+                    "public": "http://proxy:8080/kucoin",
+                    "private": "http://proxy:8080/kucoin"
+                }
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 60000
+        },
+        "pair_whitelist": [
+           "CREDI/USDT",
+           "BULL/USDT",
+           "MARS4/USDT",
+           "NHCT/USDT",
+           "MLS/USDT",
+           "NORD/USDT",
+           "XTAG/USDT",
+           "HAKA/USDT",
+           "PBR/USDT",
+           "1EARTH/USDT",
+           "BTC/USDT"
+        ],
+        "pair_blacklist": []
+    },
+    "pairlists": [
+        {
+            "method": "StaticPairList",
+            "number_assets": 11,
+            "sort_key": "quoteVolume",
+            "min_value": 0,
+            "refresh_period": 1800
+        }
+    ],
+    "telegram": {
+        "enabled": false,
+        "token": "",
+        "chat_id": ""
+    },
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "ae412db3a7d3c4076e92088109331deaeed58d0840e41aeb04afbc37f66388cb",
+        "ws_token": "P3RWZvSHaCxv39j_bj7WF2OU1BJmzRujIA",
+        "CORS_origins": [],
+        "username": "freqtrade",
+        "password": "freqtrade"
+    },
+    "bot_name": "freqtrade",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}
