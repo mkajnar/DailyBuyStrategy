@@ -1,36 +1,18 @@
 #!/bin/bash
 
-base_directory="user_data"
-
-if [ ! -d "$base_directory" ]; then
-    mkdir $base_directory
-fi
-
-directories=(
-    "backtest_results"
-    "data"
-    "freqmodels"
-    "hyperopt_results"
-    "hyperopts"
-    "logs"
-    "notebooks"
-    "plot"
-    "strategies"
-	"data/kucoin"
-)
-
-for dir in "${directories[@]}"; do
-    if [ ! -d "$base_directory/$dir" ]; then
-        mkdir "$base_directory/$dir"
-    fi
-done
-
+chmod 777 user_data
+mkdir user_data/backtest_results
+mkdir user_data/data
+mkdir user_data/data/kucoin
+mkdir user_data/freqmodels
+mkdir user_data/hyperopt_results
+mkdir user_data/hyperopts
+mkdir user_data/logs
+mkdir user_data/notebooks
+mkdir user_data/plot
+mkdir user_data/strategies
 chmod 777 -R user_data
 
 docker-compose down
 docker-compose up -d
 docker-compose logs -f
-
-
-
-
