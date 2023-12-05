@@ -1,12 +1,9 @@
-# --- Do not remove these libs ---
 import os
 from pathlib import Path
-
 from freqtrade.strategy.interface import IStrategy
 from typing import Dict, List, Optional
 from functools import reduce
 from pandas import DataFrame
-# --------------------------------
 import talib.abstract as ta
 import numpy as np
 import freqtrade.vendor.qtpylib.indicators as qtpylib
@@ -14,19 +11,16 @@ import datetime
 from technical.util import resample_to_interval, resampled_merge
 from datetime import datetime, timedelta
 from freqtrade.persistence import Trade
-from freqtrade.strategy import stoploss_from_open, merge_informative_pair, DecimalParameter, IntParameter, \
-    CategoricalParameter
+from freqtrade.strategy import stoploss_from_open, merge_informative_pair, DecimalParameter, IntParameter, CategoricalParameter
 import technical.indicators as ftt
 import math
 import logging
 import json
 import os
 import pandas as pd
-
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
-
 
 def EWO(dataframe, ema_length=5, ema2_length=3):
     df = dataframe.copy()
@@ -37,22 +31,7 @@ def EWO(dataframe, ema_length=5, ema2_length=3):
 
 class HPStrategy(IStrategy):
     INTERFACE_VERSION = 2
-
     max_safety_orders = 3
-
-    """
-    # ROI table:
-    minimal_roi = {
-    "0": 0.08,
-        "20": 0.04,
-        "40": 0.032,
-        "87": 0.016,
-        "201": 0,
-        "202": -1
-    }
-    """
-
-    # Buy hyperspace params:
     buy_params = {
         "base_nb_candles_buy": 12,
         "rsi_buy": 58,
@@ -69,21 +48,17 @@ class HPStrategy(IStrategy):
         "buy_ema_cofi": 0.98,
         "buy_ewo_high": 4.179
     }
-
-    # Sell hyperspace params:
     sell_params = {
         "base_nb_candles_sell": 22,
         "high_offset": 1.014,
         "high_offset_2": 1.01
     }
-
     order_types = {
         'entry': 'market',
         'exit': 'market',
         'stoploss': 'market',
         'stoploss_on_exchange': False
     }
-
     @property
     def protections(self):
         return [
@@ -121,7 +96,6 @@ class HPStrategy(IStrategy):
             }
         ]
 
-    # ROI table:
     minimal_roi = {
         "0": 0.99,
     }
@@ -131,67 +105,43 @@ class HPStrategy(IStrategy):
     price_drop_percentage = {}
     pairs_close_to_high = []
     locked = []
-
-    # Stoploss:
     stoploss = -0.99
-
-    # SMAOffset
     base_nb_candles_buy = IntParameter(8, 20, default=buy_params['base_nb_candles_buy'], space='buy', optimize=False)
-    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell',
-                                        optimize=False)
+    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell', optimize=False)
     low_offset = DecimalParameter(0.975, 0.995, default=buy_params['low_offset'], space='buy', optimize=True)
     high_offset = DecimalParameter(1.000, 1.010, default=sell_params['high_offset'], space='sell', optimize=True)
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
-
-    # lambo2
-    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=buy_params['lambo2_ema_14_factor'],
-                                            space='buy', optimize=True)
+    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=buy_params['lambo2_ema_14_factor'], space='buy', optimize=True)
     lambo2_rsi_4_limit = IntParameter(10, 60, default=buy_params['lambo2_rsi_4_limit'], space='buy', optimize=True)
     lambo2_rsi_14_limit = IntParameter(10, 60, default=buy_params['lambo2_rsi_14_limit'], space='buy', optimize=True)
-
-    # Protection
     fast_ewo = 50
     slow_ewo = 200
-
     ewo_low = DecimalParameter(-20.0, -7.0, default=buy_params['ewo_low'], space='buy', optimize=True)
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=True)
     rsi_buy = IntParameter(30, 70, default=buy_params['rsi_buy'], space='buy', optimize=False)
-
-    # Trailing stop:
     trailing_stop = True
     trailing_stop_positive = 0.001
     trailing_stop_positive_offset = 0.012
     trailing_only_offset_is_reached = True
-
-    # cofi
     is_optimize_cofi = False
     buy_ema_cofi = DecimalParameter(0.96, 0.98, default=0.97, optimize=is_optimize_cofi)
     buy_fastk = IntParameter(20, 30, default=20, optimize=is_optimize_cofi)
     buy_fastd = IntParameter(20, 30, default=20, optimize=is_optimize_cofi)
     buy_adx = IntParameter(20, 30, default=30, optimize=is_optimize_cofi)
     buy_ewo_high = DecimalParameter(2, 12, default=3.553, optimize=is_optimize_cofi)
-
-    # Sell signal
     use_sell_signal = True
     sell_profit_only = True
     sell_profit_offset = 0.01
     ignore_roi_if_buy_signal = False
-
-    # Adjusting
     position_adjustment_enable = True
-    ## Optional order time in force.
     order_time_in_force = {
         'buy': 'gtc',
         'sell': 'gtc'
     }
-
-    # Optimal timeframe for the strategy
     timeframe = '1m'
     inf_1h = '1h'
-
     process_only_new_candles = True
     startup_candle_count = 400
-
     plot_config = {
         'main_plot': {
             'ma_buy': {'color': 'orange'},
@@ -201,8 +151,7 @@ class HPStrategy(IStrategy):
 
     def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
-        # Sell any positions at a loss if they are held for more than 7 days.
-        if current_profit < -0.04 and (current_time - trade.open_date_utc).days >= 4:
+        if current_profit < -0.05 and (current_time - trade.open_date_utc).days >= 7:
             return 'unclog'
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
@@ -210,10 +159,10 @@ class HPStrategy(IStrategy):
                             leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
         min_trade_size = 3
         if proposed_stake < min_trade_size:
-            return 0  # Nedostatečná sázka pro obchod
+            return 0
         max_stake_for_safety_orders = max_stake / self.max_safety_orders
         if max_stake_for_safety_orders < min_trade_size:
-            return 0  # Nedostatek prostředků pro obchodování
+            return 0
         return min(proposed_stake, max_stake_for_safety_orders)
 
     def informative_pairs(self):
@@ -260,73 +209,40 @@ class HPStrategy(IStrategy):
         with open(os.path.join(user_data_directory, 'high_moving_pairs.json'), 'w') as f:
             json.dump(self.pairs_close_to_high, f, indent=4)
 
-
-
     def pump_dump_protection(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
-        df36h = dataframe.copy().shift(432)  # TODO FIXME: This assumes 5m timeframe
-        df24h = dataframe.copy().shift(288)  # TODO FIXME: This assumes 5m timeframe
-
+        df36h = dataframe.copy().shift(432)
+        df24h = dataframe.copy().shift(288)
         dataframe['volume_mean_short'] = dataframe['volume'].rolling(4).mean()
         dataframe['volume_mean_long'] = df24h['volume'].rolling(48).mean()
         dataframe['volume_mean_base'] = df36h['volume'].rolling(288).mean()
-
         dataframe['volume_change_percentage'] = (dataframe['volume_mean_long'] / dataframe['volume_mean_base'])
-
         dataframe['rsi_mean'] = dataframe['rsi'].rolling(48).mean()
-
-        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0),
-                                                -1, 0)
-
+        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0), -1, 0)
         return dataframe
 
     def base_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Indicators
-        # -----------------------------------------------------------------------------------------
-        dataframe['price_trend_long'] = (
-                    dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
-
-        # Add prefix
-        # -----------------------------------------------------------------------------------------
+        dataframe['price_trend_long'] = (dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
         ignore_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
         dataframe.rename(columns=lambda s: f"btc_{s}" if s not in ignore_columns else s, inplace=True)
-
         return dataframe
 
     def info_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Indicators
-        # -----------------------------------------------------------------------------------------
         dataframe['rsi_8'] = ta.RSI(dataframe, timeperiod=8)
-
-        # Add prefix
-        # -----------------------------------------------------------------------------------------
         ignore_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
         dataframe.rename(columns=lambda s: f"btc_{s}" if s not in ignore_columns else s, inplace=True)
-
         return dataframe
-
 
     def save_dictionaries_to_disk(self):
         try:
-            # Cesta k adresáři, kde chcete slovníky uložit
             user_data_directory = os.path.join('user_data')
-
-            # Ujistěte se, že adresář existuje
             if not os.path.exists(user_data_directory):
                 os.makedirs(user_data_directory)
-
-            # Uložení slovníku lowest_prices
             with open(os.path.join(user_data_directory, 'lowest_prices.json'), 'w') as file:
                 json.dump(self.lowest_prices, file, indent=4)
-
-            # Uložení slovníku highest_prices
             with open(os.path.join(user_data_directory, 'highest_prices.json'), 'w') as file:
                 json.dump(self.highest_prices, file, indent=4)
-
-            # Uložení slovníku price_drop_percentage
             with open(os.path.join(user_data_directory, 'price_drop_percentage.json'), 'w') as file:
                 json.dump(self.price_drop_percentage, file, indent=4)
-
         except Exception as ex:
             logging.error(str(ex))
             pass
@@ -335,31 +251,22 @@ class HPStrategy(IStrategy):
 
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
-        # Výpočet %K
         low_min = dataframe['low'].rolling(window=14).min()
         high_max = dataframe['high'].rolling(window=14).max()
         dataframe['stoch_k'] = 100 * (dataframe['close'] - low_min) / (high_max - low_min)
-        # Výpočet %D
         dataframe['stoch_d'] = dataframe['stoch_k'].rolling(window=3).mean()
-
-        # Vypočítáme volume profile
-        # Rozdělíme cenový rozsah na 'cnum' stejných dílů
-        cnum = 64  # Můžete to nastavit jako parametr funkce, pokud chcete
+        cnum = 64
         price_range = np.linspace(data_last_bbars['low'].min(), data_last_bbars['high'].max(), num=cnum)
         vol_profile = pd.cut(data_last_bbars['close'], bins=price_range, include_lowest=True, labels=range(cnum - 1))
         vol_by_price = data_last_bbars.groupby(vol_profile)['volume'].sum()
-        # Identifikujeme POC - cenu s největším objemem
         poc_index = vol_by_price.idxmax()
         dataframe['poc'] = price_range[poc_index] if poc_index >= 0 else np.nan
-        # Vypočteme Value Area
-        percent = 70  # Zase, toto může být parametr
+        percent = 70
         va_threshold = vol_by_price.sum() * (percent / 100)
         cum_vol = vol_by_price.sort_values(ascending=False).cumsum()
         value_area = cum_vol[cum_vol <= va_threshold].index
-        # Přiřadíme hodnoty pro Value Area
         dataframe['va_high'] = price_range[value_area.max()] if not value_area.empty else np.nan
         dataframe['va_low'] = price_range[value_area.min()] if not value_area.empty else np.nan
-
         pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
@@ -378,17 +285,14 @@ class HPStrategy(IStrategy):
         drop_columns = [f"{s}_{self.timeframe}" for s in ['date', 'open', 'high', 'low', 'close', 'volume']]
         dataframe.drop(columns=dataframe.columns.intersection(drop_columns), inplace=True)
 
-        # Calculate all ma_buy values
         for val in self.base_nb_candles_buy.range:
             dataframe[f'ma_buy_{val}'] = ta.EMA(dataframe, timeperiod=val)
-
-        # Calculate all ma_sell values
         for val in self.base_nb_candles_sell.range:
             dataframe[f'ma_sell_{val}'] = ta.EMA(dataframe, timeperiod=val)
 
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
-
         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
+        
         # Elliot
         dataframe['EWO'] = EWO(dataframe, self.fast_ewo, self.slow_ewo)
 
@@ -416,15 +320,12 @@ class HPStrategy(IStrategy):
 
         dataframe = self.pump_dump_protection(dataframe, metadata)
 
-        # Najdeme lokální minima pro cenu a RSI
         low_min = dataframe['low'].rolling(window=14, center=True).apply(lambda x: np.argmin(x) == 7, raw=True)
         rsi_min = dataframe['rsi'].rolling(window=14, center=True).apply(lambda x: np.argmin(x) == 7, raw=True)
-        # Identifikujeme bullish divergenci (cena dělá nová minima, ale RSI ne)
         bullish_div = (low_min.notna()) & (rsi_min.shift() > rsi_min)
         dataframe['bullish_divergence'] = bullish_div.astype(int)
 
         # Fractals
-        # Definice fraktalu pro vrchol a dno
         dataframe['fractal_top'] = (dataframe['high'] > dataframe['high'].shift(2)) & \
                                    (dataframe['high'] > dataframe['high'].shift(1)) & \
                                    (dataframe['high'] > dataframe['high'].shift(-1)) & \
@@ -433,17 +334,12 @@ class HPStrategy(IStrategy):
                                       (dataframe['low'] < dataframe['low'].shift(1)) & \
                                       (dataframe['low'] < dataframe['low'].shift(-1)) & \
                                       (dataframe['low'] < dataframe['low'].shift(-2))
-        # Označení možného bodu obratu
+
         dataframe['turnaround_signal'] = (bullish_div) & (dataframe['fractal_bottom'])
-        # Výpočet 'rolling maximum' - nejvyšší ceny dosažené do daného momentu
         dataframe['rolling_max'] = dataframe['high'].cummax()
-        # Výpočet propadu ceny v procentech z 'rolling maximum'
         dataframe['drawdown'] = (dataframe['rolling_max'] - dataframe['low']) / dataframe['rolling_max']
-        # Identifikace bodů, kde je propad ceny 90% nebo více
         dataframe['below_90_percent_drawdown'] = dataframe['drawdown'] >= 0.90
-
         dataframe.drop_duplicates()
-
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -506,28 +402,20 @@ class HPStrategy(IStrategy):
 
         dont_buy_conditions = []
 
-        # don't buy if there seems to be a Pump and Dump event.
         dont_buy_conditions.append((dataframe['pnd_volume_warn'] < 0.0))
-
         # BTC price protection
         dont_buy_conditions.append((dataframe['btc_rsi_8_1h'] < 35.0))
-
-        # Vaše nová podmínka pro nákup: Cena pod POC a va_low
         poc_condition = (
                 (dataframe['close'] < dataframe['poc']) &
                 (dataframe['close'] < dataframe['va_low'])
         )
-
-        # Kombinace nové podmínky s ostatními existujícími podmínkami
         if conditions:
             combined_conditions = [poc_condition & condition for condition in conditions]
             final_condition = reduce(lambda x, y: x | y, combined_conditions)
             dataframe.loc[final_condition, 'buy'] = 1
-
         if dont_buy_conditions:
             for condition in dont_buy_conditions:
                 dataframe.loc[condition, 'buy'] = 0
-
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -558,14 +446,12 @@ class HPStrategy(IStrategy):
                 reduce(lambda x, y: x | y, conditions),
                 'sell'
             ] = 1
-
         return dataframe
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
         sell_reason = sell_reason + "_" + trade.buy_tag
-
         current_profit = trade.calc_profit_ratio(rate)
         if current_profit >= self.sell_profit_offset or 'unclog' in sell_reason or 'force' in sell_reason:
             return True
@@ -574,7 +460,6 @@ class HPStrategy(IStrategy):
 
 def pct_change(a, b):
     return (b - a) / a
-
 
 class HPStrategyDCA(HPStrategy):
     initial_safety_order_trigger = -0.018
@@ -585,7 +470,6 @@ class HPStrategyDCA(HPStrategy):
         "dca_min_rsi": 35,
     }
 
-    # append buy_params of parent class
     buy_params.update(HPStrategy.buy_params)
     dca_min_rsi = IntParameter(35, 75, default=buy_params['dca_min_rsi'], space='buy', optimize=True)
 
@@ -598,11 +482,6 @@ class HPStrategyDCA(HPStrategy):
         return dataframe
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
-        """
-        Vypočítá volatilitu pro zadaný měnový pár a vrátí průměrnou absolutní hodnotu procentuální změny
-        za posledních 24 hodin, závisí na časovém rámci (timeframe), v procentech.
-        """
-        # Převedení timeframe na počet minut
         timeframes_in_minutes = {
             '1m': 1,
             '5m': 5,
@@ -613,49 +492,29 @@ class HPStrategyDCA(HPStrategy):
             '1d': 1440
         }
 
-        # Získání počtu minut pro jeden interval
         interval_in_minutes = timeframes_in_minutes.get(timeframe)
 
         if interval_in_minutes is None:
             raise ValueError("Neplatný timeframe. Prosím, zadejte jeden z podporovaných timeframe.")
-
-        # Počet period pro pokrytí 24 hodin
         periods = int(24 * 60 / interval_in_minutes)
-
-        # Výpočet procentuální změny
         dataframe['pct_change'] = dataframe['close'].pct_change()
-
-        # Výpočet průměru absolutních hodnot procentuální změny a převedení na procenta
         avg_volatility = dataframe['pct_change'].tail(periods).abs().mean() * 100
-
         return avg_volatility
 
     def dynamic_stake_adjustment(self, stake, volatility):
-        """
-        Dynamically adjust the stake based on the market's volatility.
-        """
         if volatility > 0.05:  # Příklad: vyšší volatilita => menší sázky
             return stake * 0.8  # Snížení sázky o 20%
         else:
             return stake  # Při nižší volatilitě zachová původní sázku
 
-
     def check_buy_conditions(self, last_candle, previous_candle):
-        """
-        Check if the buy conditions are met for the given candle.
-        """
-        # Initialize conditions list
         conditions = []
-
-        # Lambo2 condition
         lambo2 = (
                 (last_candle['close'] < (last_candle['ema_14'] * self.lambo2_ema_14_factor.value)) &
                 (last_candle['rsi_4'] < int(self.lambo2_rsi_4_limit.value)) &
                 (last_candle['rsi_14'] < int(self.lambo2_rsi_14_limit.value))
         )
         conditions.append(lambo2)
-
-        # Buy condition based on EWO, RSI, and moving averages
         buy1ewo = (
                 (last_candle['rsi_fast'] < 35) &
                 (last_candle['close'] < (
@@ -667,7 +526,6 @@ class HPStrategyDCA(HPStrategy):
                         last_candle[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
         conditions.append(buy1ewo)
-
         buy2ewo = (
                 (last_candle['rsi_fast'] < 35) &
                 (last_candle['close'] < (
@@ -678,10 +536,7 @@ class HPStrategyDCA(HPStrategy):
                         last_candle[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
         conditions.append(buy2ewo)
-
-        # Manuální kontrola překřížení pro Cofi podmínku
-        crossed_above_fastk_fastd = (previous_candle['fastk'] < previous_candle['fastd']) and (
-                last_candle['fastk'] > last_candle['fastd'])
+        crossed_above_fastk_fastd = (previous_candle['fastk'] < previous_candle['fastd']) and (last_candle['fastk'] > last_candle['fastd'])
         is_cofi = (
                 (last_candle['open'] < last_candle['ema_8'] * self.buy_ema_cofi.value) &
                 crossed_above_fastk_fastd &
@@ -691,8 +546,6 @@ class HPStrategyDCA(HPStrategy):
                 (last_candle['EWO'] > self.buy_ewo_high.value)
         )
         conditions.append(is_cofi)
-
-        # Final decision: Check if any of the conditions are True
         return any(conditions)
 
     def calculate_drawdown(self, current_price, last_order_price):
@@ -716,18 +569,14 @@ class HPStrategyDCA(HPStrategy):
         if last_candle['close'] < previous_candle['close']:
             return None
 
-        # Získání indexu aktuální svíčky
         current_candle_index = df.index[-1]
 
-        # Získání poslední uzavřené nákupní objednávky
         last_buy_order = next((order for order in sorted(trade.orders, key=lambda x: x.order_date, reverse=True)
                                if order.ft_order_side == 'buy' and order.status == 'closed'), None)
         if last_buy_order:
-            # Získání svíčky posledního nákupu
             last_buy_candle = dataframe.loc[dataframe['date'] == last_buy_order.order_date]
             if not last_buy_candle.empty:
                 last_buy_candle_index = last_buy_candle.index[0]
-                # Kontrola, zda aktuální svíčka není stejná jako svíčka posledního nákupu
                 if current_candle_index == last_buy_candle_index:
                     return None
 
@@ -754,15 +603,13 @@ class HPStrategyDCA(HPStrategy):
                         return None
 
                     try:
-                        # Výpočet rychlosti cenového pohybu
                         price_change_rate = (last_candle['close'] - previous_candle['close']) / previous_candle['close']
-                        # Nastavení dynamických hranic sázky
-                        if price_change_rate < -0.02:  # Pokud cena klesá o více než 2%
-                            adjusted_stake = stake_amount * 1.5  # Zvyšte sázku o 50%
-                        elif price_change_rate > 0.02:  # Pokud cena roste o více než 2%
-                            adjusted_stake = stake_amount * 0.75  # Snížte sázku o 25%
+                        if price_change_rate < -0.02:
+                            adjusted_stake = stake_amount * 1.5
+                        elif price_change_rate > 0.02:
+                            adjusted_stake = stake_amount * 0.75
                         else:
-                            adjusted_stake = stake_amount  # Ponechte minimální sázku
+                            adjusted_stake = stake_amount
                     except:
                         adjusted_stake = stake_amount
                         pass
