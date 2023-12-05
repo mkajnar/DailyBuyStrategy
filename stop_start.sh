@@ -1,6 +1,6 @@
 #!/bin/bash
 
-chmod 777 user_data
+chmod 777 -R *
 mkdir user_data/backtest_results
 mkdir user_data/data
 mkdir user_data/data/kucoin
@@ -15,4 +15,5 @@ chmod 777 -R user_data
 
 docker-compose down
 docker-compose up -d
+sh ./download_data_backtest.sh
 docker-compose logs -f
