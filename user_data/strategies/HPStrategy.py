@@ -261,7 +261,7 @@ class HPStrategy(IStrategy):
             pass
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
+        dataframe = dataframe.drop_duplicates()
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -352,7 +352,7 @@ class HPStrategy(IStrategy):
         dataframe['rolling_max'] = dataframe['high'].cummax()
         dataframe['drawdown'] = (dataframe['rolling_max'] - dataframe['low']) / dataframe['rolling_max']
         dataframe['below_90_percent_drawdown'] = dataframe['drawdown'] >= 0.90
-        dataframe.drop_duplicates()
+        dataframe = dataframe.drop_duplicates()
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -431,6 +431,8 @@ class HPStrategy(IStrategy):
         if dont_buy_conditions:
             for condition in dont_buy_conditions:
                 dataframe.loc[condition, 'buy'] = 0
+
+        dataframe = dataframe.drop_duplicates()
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -461,6 +463,8 @@ class HPStrategy(IStrategy):
                 reduce(lambda x, y: x | y, conditions),
                 'sell'
             ] = 1
+
+        dataframe = dataframe.drop_duplicates()
         return dataframe
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
