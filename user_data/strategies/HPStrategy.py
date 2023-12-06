@@ -376,7 +376,7 @@ class HPStrategy(IStrategy):
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
-        self.analyze_and_lock_no_moving_pairs(dataframe=dataframe, metadata=metadata, window=50, no_movement_tolerance=0.0001)
+        self.analyze_and_lock_no_moving_pairs(self, dataframe=dataframe, metadata=metadata, window=50, no_movement_tolerance=0.0001, num_candles=3)
 
         better_pair = metadata['pair'] not in self.pairs_close_to_high
 
