@@ -410,7 +410,8 @@ class HPStrategy(IStrategy):
                 (dataframe['close'] < dataframe['va_low'])
         )
         if conditions:
-            combined_conditions = [poc_condition & condition for condition in conditions]
+            # combined_conditions = [poc_condition & condition for condition in conditions]
+            combined_conditions = [condition for condition in conditions]
             final_condition = reduce(lambda x, y: x | y, combined_conditions)
             dataframe.loc[final_condition, 'buy'] = 1
         if dont_buy_conditions:
