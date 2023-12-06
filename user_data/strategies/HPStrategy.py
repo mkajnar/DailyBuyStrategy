@@ -268,18 +268,7 @@ class HPStrategy(IStrategy):
         high_max = dataframe['high'].rolling(window=14).max()
         dataframe['stoch_k'] = 100 * (dataframe['close'] - low_min) / (high_max - low_min)
         dataframe['stoch_d'] = dataframe['stoch_k'].rolling(window=3).mean()
-        cnum = 64
-        price_range = np.linspace(data_last_bbars['low'].min(), data_last_bbars['high'].max(), num=cnum)
-        vol_profile = pd.cut(data_last_bbars['close'], bins=price_range, include_lowest=True, labels=range(cnum - 1))
-        vol_by_price = data_last_bbars.groupby(vol_profile)['volume'].sum()
-        poc_index = vol_by_price.idxmax()
-        dataframe['poc'] = price_range[poc_index] if poc_index >= 0 else np.nan
-        percent = 70
-        va_threshold = vol_by_price.sum() * (percent / 100)
-        cum_vol = vol_by_price.sort_values(ascending=False).cumsum()
-        value_area = cum_vol[cum_vol <= va_threshold].index
-        dataframe['va_high'] = price_range[value_area.max()] if not value_area.empty else np.nan
-        dataframe['va_low'] = price_range[value_area.min()] if not value_area.empty else np.nan
+
         pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
@@ -420,12 +409,9 @@ class HPStrategy(IStrategy):
         dont_buy_conditions.append((dataframe['pnd_volume_warn'] < 0.0))
         # BTC price protection
         dont_buy_conditions.append((dataframe['btc_rsi_8_1h'] < 35.0))
-        poc_condition = (
-                (dataframe['close'] < dataframe['poc']) &
-                (dataframe['close'] < dataframe['va_low'])
-        )
+        
         if conditions:
-            combined_conditions = [poc_condition & condition for condition in conditions]
+            combined_conditions = [condition for condition in conditions]
             final_condition = reduce(lambda x, y: x | y, combined_conditions)
             dataframe.loc[final_condition, 'buy'] = 1
         if dont_buy_conditions:
