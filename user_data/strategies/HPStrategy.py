@@ -54,7 +54,7 @@ class HPStrategy(IStrategy):
         "high_offset_2": 1.01
     }
     order_types = {
-        'entry': 'market',
+        'entry': 'limit',
         'exit': 'market',
         'stoploss': 'market',
         'stoploss_on_exchange': False
