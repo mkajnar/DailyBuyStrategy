@@ -361,10 +361,10 @@ class HPStrategy(IStrategy):
         conditions.append(lambo2)
 
         buy1ewo = (
-                (dataframe['rsi_fast'] < 35) &
+                # (dataframe['rsi_fast'] < 35) &
                 (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
                 (dataframe['EWO'] > self.ewo_high.value) &
-                (dataframe['rsi'] < self.rsi_buy.value) &
+                # (dataframe['rsi'] < self.rsi_buy.value) &
                 (dataframe['volume'] > 0) &
                 (dataframe['close'] < (
                             dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
@@ -373,7 +373,7 @@ class HPStrategy(IStrategy):
         conditions.append(buy1ewo)
 
         buy2ewo = (
-                (dataframe['rsi_fast'] < 35) &
+                # (dataframe['rsi_fast'] < 35) &
                 (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
                 (dataframe['EWO'] < self.ewo_low.value) &
                 (dataframe['volume'] > 0) &
