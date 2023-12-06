@@ -179,24 +179,18 @@ class HPStrategy(IStrategy):
 
         return informative_pairs
 
-    def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001):
+    def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001, num_candles=3):
         pair = metadata['pair']
-        # Objem
-        last_volume = dataframe['volume'].iloc[-2:]
-        avg_volume = last_volume.mean()
-        # Změny cen
-        last_open_price = dataframe['open'].iloc[-2]
-        last_close_price = dataframe['close'].iloc[-2]
-        second_last_open_price = dataframe['open'].iloc[-1]
-        second_last_close_price = dataframe['close'].iloc[-1]
-
-        # Podmínka pro zamykání
-        if abs(last_close_price - last_open_price) < no_movement_tolerance and abs(second_last_close_price - second_last_open_price) < no_movement_tolerance:
-            if avg_volume < 10000:
-                if pair not in self.locked:
-                    logging.info(f"Locking {pair} due to low volatility")
-                    self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
-                    self.locked.append(pair)
+        
+        last_closes = dataframe['close'].iloc[-num_candles:]
+        
+        close_range = last_closes.max() - last_closes.min()
+        
+        if close_range < no_movement_tolerance:
+            if pair not in self.locked:
+                logging.info(f"Locking {pair} due to low price movement in last {num_candles} closes")
+                self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=3))
+                self.locked.append(pair)
         else:
             if pair in self.locked:
                 logging.info(f"Unlocking {pair} as it shows price movement")
