@@ -506,15 +506,22 @@ class HPStrategyDCA(HPStrategy):
             '4h': 240,
             '1d': 1440
         }
-
+    
         interval_in_minutes = timeframes_in_minutes.get(timeframe)
-
-        if interval_in_minutes is None:
-            raise ValueError("Neplatný timeframe. Prosím, zadejte jeden z podporovaných timeframe.")
         periods = int(24 * 60 / interval_in_minutes)
-        dataframe['pct_change'] = dataframe['close'].pct_change()
+    
+        if 'close' in dataframe.columns and not dataframe['close'].isnull().all():
+            price_column = 'close'
+        elif 'high' in dataframe.columns and not dataframe['high'].isnull().all():
+            price_column = 'high'
+        elif 'open' in dataframe.columns:
+            price_column = 'open'
+    
+        dataframe['pct_change'] = dataframe[price_column].pct_change()
         avg_volatility = dataframe['pct_change'].tail(periods).abs().mean() * 100
+    
         return avg_volatility
+
 
     def dynamic_stake_adjustment(self, stake, volatility):
         if volatility > 0.05:  # Příklad: vyšší volatilita => menší sázky
