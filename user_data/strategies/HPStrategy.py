@@ -181,6 +181,29 @@ class HPStrategy(IStrategy):
 
     def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001):
         pair = metadata['pair']
+        # Objem
+        last_volume = dataframe['volume'].iloc[-2:]
+        avg_volume = last_volume.mean()
+        # Změny cen
+        last_open_price = dataframe['open'].iloc[-2]
+        last_close_price = dataframe['close'].iloc[-2]
+        second_last_open_price = dataframe['open'].iloc[-1]
+        second_last_close_price = dataframe['close'].iloc[-1]
+
+        # Podmínka pro zamykání
+        if abs(last_close_price - last_open_price) < no_movement_tolerance and abs(second_last_close_price - second_last_open_price) < no_movement_tolerance:
+            if avg_volume < 10000:
+                if pair not in self.locked:
+                    logging.info(f"Locking {pair} due to low volatility")
+                    self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
+                    self.locked.append(pair)
+        else:
+            if pair in self.locked:
+                logging.info(f"Unlocking {pair} as it shows price movement")
+                self.locked.remove(pair)
+
+    def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001):
+        pair = metadata['pair']
         last_open_price = dataframe['open'].iloc[-2]
         last_close_price = dataframe['close'].iloc[-2]
         second_last_open_price = dataframe['open'].iloc[-1]
@@ -306,7 +329,7 @@ class HPStrategy(IStrategy):
 
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
-        
+
         # Elliot
         dataframe['EWO'] = EWO(dataframe, self.fast_ewo, self.slow_ewo)
 
@@ -359,8 +382,8 @@ class HPStrategy(IStrategy):
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
-        self.analyze_and_lock_no_moving_pairs(dataframe=dataframe, metadata=metadata, window==50, no_movement_tolerance=0.0001)
-        
+        self.analyze_and_lock_no_moving_pairs(dataframe=dataframe, metadata=metadata, window=50, no_movement_tolerance=0.0001)
+
         better_pair = metadata['pair'] not in self.pairs_close_to_high
 
         conditions = []
