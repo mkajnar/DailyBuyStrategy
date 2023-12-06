@@ -54,7 +54,7 @@ class HPStrategy(IStrategy):
         "high_offset_2": 1.01
     }
     order_types = {
-        'entry': 'limit',
+        'entry': 'market',
         'exit': 'market',
         'stoploss': 'market',
         'stoploss_on_exchange': False
@@ -179,19 +179,6 @@ class HPStrategy(IStrategy):
 
         return informative_pairs
 
-    def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, no_movement_tolerance=0.0001, num_candles=3):
-        pair = metadata['pair']
-        last_closes = dataframe['close'].iloc[-num_candles:]
-        close_range = last_closes.max() - last_closes.min()
-        if close_range < no_movement_tolerance:
-            if pair not in self.locked:
-                logging.info(f"Locking {pair} due to low price movement in last {num_candles} closes")
-                self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=3))
-                self.locked.append(pair)
-        else:
-            if pair in self.locked:
-                logging.info(f"Unlocking {pair} as it shows price movement")
-                self.locked.remove(pair)
 
     def analyze_price_movements(self, dataframe, metadata, window=50):
         pair = metadata['pair']
@@ -261,14 +248,25 @@ class HPStrategy(IStrategy):
             pass
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe = dataframe.drop_duplicates()
+
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
         high_max = dataframe['high'].rolling(window=14).max()
         dataframe['stoch_k'] = 100 * (dataframe['close'] - low_min) / (high_max - low_min)
         dataframe['stoch_d'] = dataframe['stoch_k'].rolling(window=3).mean()
-
+        cnum = 64
+        price_range = np.linspace(data_last_bbars['low'].min(), data_last_bbars['high'].max(), num=cnum)
+        vol_profile = pd.cut(data_last_bbars['close'], bins=price_range, include_lowest=True, labels=range(cnum - 1))
+        vol_by_price = data_last_bbars.groupby(vol_profile)['volume'].sum()
+        poc_index = vol_by_price.idxmax()
+        dataframe['poc'] = price_range[poc_index] if poc_index >= 0 else np.nan
+        percent = 70
+        va_threshold = vol_by_price.sum() * (percent / 100)
+        cum_vol = vol_by_price.sort_values(ascending=False).cumsum()
+        value_area = cum_vol[cum_vol <= va_threshold].index
+        dataframe['va_high'] = price_range[value_area.max()] if not value_area.empty else np.nan
+        dataframe['va_low'] = price_range[value_area.min()] if not value_area.empty else np.nan
         pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
@@ -294,7 +292,7 @@ class HPStrategy(IStrategy):
 
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
-
+        
         # Elliot
         dataframe['EWO'] = EWO(dataframe, self.fast_ewo, self.slow_ewo)
 
@@ -341,14 +339,12 @@ class HPStrategy(IStrategy):
         dataframe['rolling_max'] = dataframe['high'].cummax()
         dataframe['drawdown'] = (dataframe['rolling_max'] - dataframe['low']) / dataframe['rolling_max']
         dataframe['below_90_percent_drawdown'] = dataframe['drawdown'] >= 0.90
-        dataframe = dataframe.drop_duplicates()
+        dataframe.drop_duplicates()
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
-        self.analyze_and_lock_no_moving_pairs(dataframe=dataframe, metadata=metadata, no_movement_tolerance=0.0001, num_candles=10)
-
         better_pair = metadata['pair'] not in self.pairs_close_to_high
 
         conditions = []
@@ -409,16 +405,17 @@ class HPStrategy(IStrategy):
         dont_buy_conditions.append((dataframe['pnd_volume_warn'] < 0.0))
         # BTC price protection
         dont_buy_conditions.append((dataframe['btc_rsi_8_1h'] < 35.0))
-        
+        poc_condition = (
+                (dataframe['close'] < dataframe['poc']) &
+                (dataframe['close'] < dataframe['va_low'])
+        )
         if conditions:
-            combined_conditions = [condition for condition in conditions]
+            combined_conditions = [poc_condition & condition for condition in conditions]
             final_condition = reduce(lambda x, y: x | y, combined_conditions)
             dataframe.loc[final_condition, 'buy'] = 1
         if dont_buy_conditions:
             for condition in dont_buy_conditions:
                 dataframe.loc[condition, 'buy'] = 0
-
-        dataframe = dataframe.drop_duplicates()
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -449,8 +446,6 @@ class HPStrategy(IStrategy):
                 reduce(lambda x, y: x | y, conditions),
                 'sell'
             ] = 1
-
-        dataframe = dataframe.drop_duplicates()
         return dataframe
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -496,22 +491,15 @@ class HPStrategyDCA(HPStrategy):
             '4h': 240,
             '1d': 1440
         }
-    
-        interval_in_minutes = timeframes_in_minutes.get(timeframe)
-        periods = int(24 * 60 / interval_in_minutes)
-    
-        if 'close' in dataframe.columns and not dataframe['close'].isnull().all():
-            price_column = 'close'
-        elif 'high' in dataframe.columns and not dataframe['high'].isnull().all():
-            price_column = 'high'
-        elif 'open' in dataframe.columns:
-            price_column = 'open'
-    
-        dataframe['pct_change'] = dataframe[price_column].pct_change()
-        avg_volatility = dataframe['pct_change'].tail(periods).abs().mean() * 100
-    
-        return avg_volatility
 
+        interval_in_minutes = timeframes_in_minutes.get(timeframe)
+
+        if interval_in_minutes is None:
+            raise ValueError("Neplatný timeframe. Prosím, zadejte jeden z podporovaných timeframe.")
+        periods = int(24 * 60 / interval_in_minutes)
+        dataframe['pct_change'] = dataframe['close'].pct_change()
+        avg_volatility = dataframe['pct_change'].tail(periods).abs().mean() * 100
+        return avg_volatility
 
     def dynamic_stake_adjustment(self, stake, volatility):
         if volatility > 0.05:  # Příklad: vyšší volatilita => menší sázky
@@ -572,6 +560,10 @@ class HPStrategyDCA(HPStrategy):
         except Exception as e:
             return None
 
+        volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
+        adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
+        adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
+
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
         if last_candle['close'] < previous_candle['close']:
@@ -605,8 +597,10 @@ class HPStrategyDCA(HPStrategy):
             if drawdown <= self.drawdown_limit:
                 try:
                     stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
-                    stake_amount = stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1))
-                    adjusted_stake = stake_amount
+                    stake_amount = min(stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1)),
+                                       adjusted_max_stake)
+                    if stake_amount < adjusted_min_stake:
+                        return None
 
                     try:
                         price_change_rate = (last_candle['close'] - previous_candle['close']) / previous_candle['close']
@@ -614,7 +608,10 @@ class HPStrategyDCA(HPStrategy):
                             adjusted_stake = stake_amount * 1.5
                         elif price_change_rate > 0.02:
                             adjusted_stake = stake_amount * 0.75
+                        else:
+                            adjusted_stake = stake_amount
                     except:
+                        adjusted_stake = stake_amount
                         pass
 
                     return adjusted_stake
