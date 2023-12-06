@@ -586,10 +586,6 @@ class HPStrategyDCA(HPStrategy):
         except Exception as e:
             return None
 
-        volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
-        adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
-        adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
-
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
         if last_candle['close'] < previous_candle['close']:
@@ -623,10 +619,8 @@ class HPStrategyDCA(HPStrategy):
             if drawdown <= self.drawdown_limit:
                 try:
                     stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
-                    stake_amount = min(stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1)),
-                                       adjusted_max_stake)
-                    if stake_amount < adjusted_min_stake:
-                        return None
+                    stake_amount = stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1))
+                    adjusted_stake = stake_amount
 
                     try:
                         price_change_rate = (last_candle['close'] - previous_candle['close']) / previous_candle['close']
@@ -634,10 +628,7 @@ class HPStrategyDCA(HPStrategy):
                             adjusted_stake = stake_amount * 1.5
                         elif price_change_rate > 0.02:
                             adjusted_stake = stake_amount * 0.75
-                        else:
-                            adjusted_stake = stake_amount
                     except:
-                        adjusted_stake = stake_amount
                         pass
 
                     return adjusted_stake
