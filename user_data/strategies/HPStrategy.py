@@ -180,6 +180,7 @@ class HPStrategy(IStrategy):
         return informative_pairs
 
     def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001):
+        pair = metadata['pair']
         last_open_price = dataframe['open'].iloc[-2]
         last_close_price = dataframe['close'].iloc[-2]
         second_last_open_price = dataframe['open'].iloc[-1]
