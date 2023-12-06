@@ -179,6 +179,19 @@ class HPStrategy(IStrategy):
 
         return informative_pairs
 
+    def analyze_and_lock_no_moving_pairs(self, dataframe, metadata, window=50, no_movement_tolerance=0.0001):
+        last_open_price = dataframe['open'].iloc[-2]
+        last_close_price = dataframe['close'].iloc[-2]
+        second_last_open_price = dataframe['open'].iloc[-1]
+        second_last_close_price = dataframe['close'].iloc[-1]
+        if abs(last_close_price - last_open_price) < no_movement_tolerance and abs(second_last_close_price - second_last_open_price) < no_movement_tolerance:
+            if pair not in self.locked:
+                logging.info(f"Locking {pair} due to no price movement")
+                self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
+                self.locked.append(pair)
+        else:
+            if pair in self.locked:
+                self.locked.remove(pair)
 
     def analyze_price_movements(self, dataframe, metadata, window=50):
         pair = metadata['pair']
@@ -345,6 +358,8 @@ class HPStrategy(IStrategy):
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
+        self.analyze_and_lock_no_moving_pairs(dataframe=dataframe, metadata=metadata, window==50, no_movement_tolerance=0.0001)
+        
         better_pair = metadata['pair'] not in self.pairs_close_to_high
 
         conditions = []
