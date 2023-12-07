@@ -638,9 +638,6 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
     trailing_stop_positive = 0.005
     trailing_stop_positive_offset = 0.02
     trailing_only_offset_is_reached = True
-    process_only_new_candles = True
-    startup_candle_count = 100
-
 
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI 1.4"
@@ -654,9 +651,4 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         )
         dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
         dataframe.loc[rsi_crossover, 'buy'] = 1
-
         return dataframe
-
-    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        self.trailing_stop_positive_offset = dataframe['open'] * 1.05
-        pass
