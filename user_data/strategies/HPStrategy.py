@@ -146,8 +146,8 @@ class HPStrategy(IStrategy):
     }
     timeframe = '1m'
     inf_1h = '1h'
-    process_only_new_candles = True
-    startup_candle_count = 400
+    process_only_new_candles = False
+    startup_candle_count = 10
     plot_config = {
         'main_plot': {
             'ma_buy': {'color': 'orange'},
@@ -351,6 +351,118 @@ class HPStrategy(IStrategy):
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # Logování vstupního stavu
+        logging.info("Populating buy trend for pair: %s", metadata['pair'])
+
+        # Analyzujeme pohyby cen pomocí metody analyze_price_movements
+        self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
+
+        # Zkontrolujeme, zda je aktuální pár lepší než ostatní
+        better_pair = metadata['pair'] not in self.pairs_close_to_high
+
+        # Inicializujeme podmínky pro nákup
+        conditions = []
+
+        # Vytvoříme sloupec 'buy_tag' v DataFrame
+        dataframe.loc[:, 'buy_tag'] = ''
+
+        # Podmínky pro nákup pomocí strategie 'lambo2'
+        lambo2 = (
+                (dataframe['close'] < (dataframe['ema_14'] * self.lambo2_ema_14_factor.value)) &
+                (dataframe['rsi_4'] < int(self.lambo2_rsi_4_limit.value)) &
+                (dataframe['rsi_14'] < int(self.lambo2_rsi_14_limit.value))
+        )
+        if lambo2.any():
+            logging.info("Condition lambo2 met for pair: %s", metadata['pair'])
+            dataframe.loc[lambo2, 'buy_tag'] += 'lambo2_'
+        else:
+            logging.info("Condition lambo2 did not meet for pair: %s", metadata['pair'])
+        conditions.append(lambo2)
+
+        # Podmínky pro nákup pomocí strategie 'buy1eworsi'
+        buy1ewo = (
+                (dataframe['rsi_fast'] < 35) &
+                (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
+                (dataframe['EWO'] > self.ewo_high.value) &
+                (dataframe['rsi'] < self.rsi_buy.value) &
+                (dataframe['volume'] > 0) &
+                (dataframe['close'] < (
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+        )
+        if buy1ewo.any():
+            logging.info("Condition buy1eworsi met for pair: %s", metadata['pair'])
+            dataframe.loc[buy1ewo, 'buy_tag'] += 'buy1eworsi_'
+        else:
+            logging.info("Condition buy1eworsi did not meet for pair: %s", metadata['pair'])
+        conditions.append(buy1ewo)
+
+        # Podmínky pro nákup pomocí strategie 'buy2ewo'
+        buy2ewo = (
+                (dataframe['rsi_fast'] < 35) &
+                (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
+                (dataframe['EWO'] < self.ewo_low.value) &
+                (dataframe['volume'] > 0) &
+                (dataframe['close'] < (
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+        )
+        if buy2ewo.any():
+            logging.info("Condition buy2ewo met for pair: %s", metadata['pair'])
+            dataframe.loc[buy2ewo, 'buy_tag'] += 'buy2ewo_'
+        else:
+            logging.info("Condition buy2ewo did not meet for pair: %s", metadata['pair'])
+        conditions.append(buy2ewo)
+
+        # Podmínky pro nákup pomocí strategie 'cofi'
+        is_cofi = (
+                (dataframe['open'] < dataframe['ema_8'] * self.buy_ema_cofi.value) &
+                (qtpylib.crossed_above(dataframe['fastk'], dataframe['fastd'])) &
+                (dataframe['fastk'] < self.buy_fastk.value) &
+                (dataframe['fastd'] < self.buy_fastd.value) &
+                (dataframe['adx'] > self.buy_adx.value) &
+                (dataframe['EWO'] > self.buy_ewo_high.value)
+        )
+        if is_cofi.any():
+            logging.info("Condition cofi met for pair: %s", metadata['pair'])
+            dataframe.loc[is_cofi, 'buy_tag'] += 'cofi_'
+        else:
+            logging.info("Condition cofi did not meet for pair: %s", metadata['pair'])
+        conditions.append(is_cofi)
+
+        # Pokud jsou splněny nějaké podmínky pro nákup, nastavíme sloupec 'buy' na 1
+        if conditions:
+            dataframe.loc[reduce(lambda x, y: x | y, conditions) & better_pair, 'buy'] = 1
+
+        # Podmínky, které brání nákupu
+        dont_buy_conditions = []
+
+        # Podmínka pro varování o objemu
+        dont_buy_conditions.append((dataframe['pnd_volume_warn'] < 0.0))
+
+        # Podmínka pro ochranu před cenou BTC
+        dont_buy_conditions.append((dataframe['btc_rsi_8_1h'] < 35.0))
+
+        # Logování důvodů proč byl nebo nebyl signál nákupu vytvořen
+        for i, condition in enumerate(dont_buy_conditions):
+            if condition.any():
+                logging.info("Don't buy condition %d met for pair: %s", i, metadata['pair'])
+            else:
+                logging.info("Don't buy condition %d did not meet for pair: %s", i, metadata['pair'])
+
+        # Pokud jsou splněny podmínky pro nákup, které brání nákupu, nastavíme 'buy' na 0
+        if dont_buy_conditions:
+            for i, condition in enumerate(dont_buy_conditions):
+                if condition.any():
+                    logging.info("Don't buy condition %d met for pair: %s", i, metadata['pair'])
+                else:
+                    logging.info("Don't buy condition %d did not meet for pair: %s", i, metadata['pair'])
+                    dataframe.loc[condition, 'buy'] = 0
+
+        # Logování výstupního stavu
+        logging.info("Buy trend populated for pair: %s", metadata['pair'])
+
+        return dataframe
+
+    """ def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.analyze_price_movements(dataframe=dataframe, metadata=metadata, window=200)
         better_pair = metadata['pair'] not in self.pairs_close_to_high
@@ -413,10 +525,10 @@ class HPStrategy(IStrategy):
         dont_buy_conditions.append((dataframe['pnd_volume_warn'] < 0.0))
         # BTC price protection
         dont_buy_conditions.append((dataframe['btc_rsi_8_1h'] < 35.0))
-        """ poc_condition = (
-                (dataframe['close'] < dataframe['poc']) &
-                (dataframe['close'] < dataframe['va_low'])
-        ) """
+        # poc_condition = (
+        #        (dataframe['close'] < dataframe['poc']) &
+        #        (dataframe['close'] < dataframe['va_low'])
+        #)
         if conditions:
             # combined_conditions = [poc_condition & condition for condition in conditions]
             combined_conditions = [condition for condition in conditions]
@@ -425,7 +537,7 @@ class HPStrategy(IStrategy):
         if dont_buy_conditions:
             for condition in dont_buy_conditions:
                 dataframe.loc[condition, 'buy'] = 0
-        return dataframe
+        return dataframe """
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
@@ -489,6 +601,16 @@ class HPStrategyDCA(HPStrategy):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+        resampled_frame = dataframe.resample('15T', on='date').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        })
+        resampled_frame['higher_tf_trend'] = (resampled_frame['close'] > resampled_frame['open']).astype(int)
+        resampled_frame['higher_tf_trend'] = resampled_frame['higher_tf_trend'].replace({1: 1, 0: -1})
+        dataframe['higher_tf_trend'] = dataframe['date'].map(resampled_frame['higher_tf_trend'])
         return dataframe
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
@@ -632,8 +754,8 @@ class HPStrategyDCA(HPStrategy):
 
         return None
 
-class HPStrategyDCA_FLRSI(HPStrategyDCA):
 
+class HPStrategyDCA_FLRSI(HPStrategyDCA):
     trailing_stop = True
     trailing_stop_positive = 0.005
     trailing_stop_positive_offset = 0.02
@@ -642,13 +764,28 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI 1.4"
 
-    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float, current_profit: float, after_fill: bool, **kwargs) -> Optional[float]:
+    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
+                        current_profit: float, after_fill: bool, **kwargs) -> Optional[float]:
         dataframe = self.dp.get_pair_dataframe(pair=pair, timeframe=self.timeframe)
         recent_data = dataframe[dataframe['date'] > (current_time - pd.Timedelta(hours=24))]
         log_returns = np.log(recent_data['close'] / recent_data['close'].shift(1))
         volatility = log_returns.std()
         stop_loss_value = -1 * volatility * 1.1
         return stop_loss_value
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = super().populate_indicators(dataframe, metadata)
+        resampled_frame = dataframe.resample('15T', on='date').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+            'volume': 'sum'
+        })
+        resampled_frame['higher_tf_trend'] = (resampled_frame['close'] > resampled_frame['open']).astype(int)
+        resampled_frame['higher_tf_trend'] = resampled_frame['higher_tf_trend'].replace({1: 1, 0: -1})
+        dataframe['higher_tf_trend'] = dataframe['date'].map(resampled_frame['higher_tf_trend'])
+        return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
