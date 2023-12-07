@@ -641,15 +641,12 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
 
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI 1.4"
-    def calculate_volatility(self, pair: str, current_time: 'datetime', **kwargs) -> float:
+
+    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float, current_profit: float, after_fill: bool, **kwargs) -> Optional[float]:
         dataframe = self.dp.get_pair_dataframe(pair=pair, timeframe=self.timeframe)
         recent_data = dataframe[dataframe['date'] > (current_time - pd.Timedelta(hours=24))]
         log_returns = np.log(recent_data['close'] / recent_data['close'].shift(1))
         volatility = log_returns.std()
-        return volatility
-
-    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float, current_profit: float, after_fill: bool, **kwargs) -> Optional[float]:
-        volatility = self.calculate_volatility(pair, current_time, **kwargs)
         stop_loss_value = -1 * volatility * 1.1
         return stop_loss_value
 
