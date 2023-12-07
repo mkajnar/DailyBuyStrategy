@@ -633,6 +633,12 @@ class HPStrategyDCA(HPStrategy):
         return None
 
 class HPStrategyDCA_FLRSI(HPStrategyDCA):
+
+    trailing_stop = True
+    trailing_stop_positive = 0.005
+    trailing_stop_positive_offset = 0.02
+    trailing_only_offset_is_reached = True
+
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI 1.4"
 
@@ -646,4 +652,3 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
         dataframe.loc[rsi_crossover, 'buy'] = 1
         return dataframe
-        
