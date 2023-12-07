@@ -601,7 +601,7 @@ class HPStrategyDCA(HPStrategy):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
-        resampled_frame = dataframe.resample('15T', on='date').agg({
+        resampled_frame = dataframe.resample('5T', on='date').agg({
             'open': 'first',
             'high': 'max',
             'low': 'min',
@@ -775,7 +775,7 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
-        resampled_frame = dataframe.resample('15T', on='date').agg({
+        resampled_frame = dataframe.resample('5T', on='date').agg({
             'open': 'first',
             'high': 'max',
             'low': 'min',
