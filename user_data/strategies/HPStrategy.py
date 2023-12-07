@@ -632,17 +632,18 @@ class HPStrategyDCA(HPStrategy):
 
         return None
 
-
 class HPStrategyDCA_FLRSI(HPStrategyDCA):
     def version(self) -> str:
-        return "HPStrategyDCA_FLRSI 1.1"
+        return "HPStrategyDCA_FLRSI 1.4"
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
-        adjusted_rsi = dataframe['rsi'] * 1.1
+        adjusted_rsi_slow = dataframe['rsi_slow'] * 1.03
+        adjusted_rsi = dataframe['rsi'] * 0.97
         rsi_crossover = (
-                (qtpylib.crossed_above(adjusted_rsi, dataframe['rsi_slow']))
+            (qtpylib.crossed_above(adjusted_rsi, adjusted_rsi_slow))
         )
         dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
         dataframe.loc[rsi_crossover, 'buy'] = 1
         return dataframe
+        
