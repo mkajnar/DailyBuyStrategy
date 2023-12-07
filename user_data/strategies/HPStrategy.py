@@ -11,7 +11,8 @@ import datetime
 from technical.util import resample_to_interval, resampled_merge
 from datetime import datetime, timedelta
 from freqtrade.persistence import Trade
-from freqtrade.strategy import stoploss_from_open, merge_informative_pair, DecimalParameter, IntParameter, CategoricalParameter
+from freqtrade.strategy import stoploss_from_open, merge_informative_pair, DecimalParameter, IntParameter, \
+    CategoricalParameter
 import technical.indicators as ftt
 import math
 import logging
@@ -22,12 +23,14 @@ from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
+
 def EWO(dataframe, ema_length=5, ema2_length=3):
     df = dataframe.copy()
     ema1 = ta.EMA(df, timeperiod=ema_length)
     ema2 = ta.EMA(df, timeperiod=ema2_length)
     emadif = (ema1 - ema2) / df['close'] * 100
     return emadif
+
 
 class HPStrategy(IStrategy):
     INTERFACE_VERSION = 2
@@ -59,6 +62,7 @@ class HPStrategy(IStrategy):
         'stoploss': 'market',
         'stoploss_on_exchange': False
     }
+
     @property
     def protections(self):
         return [
@@ -107,11 +111,13 @@ class HPStrategy(IStrategy):
     locked = []
     stoploss = -0.99
     base_nb_candles_buy = IntParameter(8, 20, default=buy_params['base_nb_candles_buy'], space='buy', optimize=False)
-    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell', optimize=False)
+    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell',
+                                        optimize=False)
     low_offset = DecimalParameter(0.975, 0.995, default=buy_params['low_offset'], space='buy', optimize=True)
     high_offset = DecimalParameter(1.000, 1.010, default=sell_params['high_offset'], space='sell', optimize=True)
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
-    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=buy_params['lambo2_ema_14_factor'], space='buy', optimize=True)
+    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=buy_params['lambo2_ema_14_factor'],
+                                            space='buy', optimize=True)
     lambo2_rsi_4_limit = IntParameter(10, 60, default=buy_params['lambo2_rsi_4_limit'], space='buy', optimize=True)
     lambo2_rsi_14_limit = IntParameter(10, 60, default=buy_params['lambo2_rsi_14_limit'], space='buy', optimize=True)
     fast_ewo = 50
@@ -179,7 +185,6 @@ class HPStrategy(IStrategy):
 
         return informative_pairs
 
-
     def analyze_price_movements(self, dataframe, metadata, window=50):
         pair = metadata['pair']
         low = dataframe['low'].rolling(window=window).min()
@@ -217,11 +222,13 @@ class HPStrategy(IStrategy):
         dataframe['volume_mean_base'] = df36h['volume'].rolling(288).mean()
         dataframe['volume_change_percentage'] = (dataframe['volume_mean_long'] / dataframe['volume_mean_base'])
         dataframe['rsi_mean'] = dataframe['rsi'].rolling(48).mean()
-        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0), -1, 0)
+        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0),
+                                                -1, 0)
         return dataframe
 
     def base_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['price_trend_long'] = (dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
+        dataframe['price_trend_long'] = (
+                dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
         ignore_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
         dataframe.rename(columns=lambda s: f"btc_{s}" if s not in ignore_columns else s, inplace=True)
         return dataframe
@@ -368,7 +375,7 @@ class HPStrategy(IStrategy):
                 (dataframe['rsi'] < self.rsi_buy.value) &
                 (dataframe['volume'] > 0) &
                 (dataframe['close'] < (
-                            dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
         dataframe.loc[buy1ewo, 'buy_tag'] += 'buy1eworsi_'
         conditions.append(buy1ewo)
@@ -379,7 +386,7 @@ class HPStrategy(IStrategy):
                 (dataframe['EWO'] < self.ewo_low.value) &
                 (dataframe['volume'] > 0) &
                 (dataframe['close'] < (
-                            dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
         dataframe.loc[buy2ewo, 'buy_tag'] += 'buy2ewo_'
         conditions.append(buy2ewo)
@@ -426,7 +433,7 @@ class HPStrategy(IStrategy):
         conditions.append(
             ((dataframe['close'] > dataframe['hma_50']) &
              (dataframe['close'] > (
-                         dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset_2.value)) &
+                     dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset_2.value)) &
              (dataframe['rsi'] > 50) &
              (dataframe['volume'] > 0) &
              (dataframe['rsi_fast'] > dataframe['rsi_slow'])
@@ -436,7 +443,7 @@ class HPStrategy(IStrategy):
             (
                     (dataframe['close'] < dataframe['hma_50']) &
                     (dataframe['close'] > (
-                                dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value)) &
+                            dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value)) &
                     (dataframe['volume'] > 0) &
                     (dataframe['rsi_fast'] > dataframe['rsi_slow'])
             )
@@ -462,6 +469,7 @@ class HPStrategy(IStrategy):
 
 def pct_change(a, b):
     return (b - a) / a
+
 
 class HPStrategyDCA(HPStrategy):
     initial_safety_order_trigger = -0.018
@@ -538,7 +546,8 @@ class HPStrategyDCA(HPStrategy):
                         last_candle[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
         conditions.append(buy2ewo)
-        crossed_above_fastk_fastd = (previous_candle['fastk'] < previous_candle['fastd']) and (last_candle['fastk'] > last_candle['fastd'])
+        crossed_above_fastk_fastd = (previous_candle['fastk'] < previous_candle['fastd']) and (
+                last_candle['fastk'] > last_candle['fastd'])
         is_cofi = (
                 (last_candle['open'] < last_candle['ema_8'] * self.buy_ema_cofi.value) &
                 crossed_above_fastk_fastd &
@@ -622,3 +631,20 @@ class HPStrategyDCA(HPStrategy):
                     return None
 
         return None
+
+
+class HPStrategyDCA_FLRSI(HPStrategy):
+    def version(self) -> str:
+        return "HPStrategyDCA_FLRSI 1.0"
+
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        conditions = []
+        dataframe.loc[:, 'buy_tag'] = ''
+        rsi_fl = (
+            (dataframe['rsi_fast'] > dataframe['rsi_slow'])
+        )
+        dataframe.loc[rsi_fl, 'buy_tag'] += 'rsi_fl'
+        conditions.append(rsi_fl)
+        if conditions:
+            dataframe.loc[reduce(lambda x, y: x | y, conditions), 'buy'] = 1
+        return dataframe
