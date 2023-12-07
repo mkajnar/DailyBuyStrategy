@@ -651,4 +651,15 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         )
         dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
         dataframe.loc[rsi_crossover, 'buy'] = 1
+        dataframe['atr'] = qtpylib.atr(dataframe, window=14)
+
+        atr_multiplier = 3  # Můžete upravit tento multiplikátor pro ovlivnění velikosti trailing stopu
+        self.trailing_stop_positive_offset = dataframe['atr'] * atr_multiplier
+
         return dataframe
+
+    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = super().populate_sell_trend(dataframe, metadata)
+        atr_multiplier = 3
+        self.trailing_stop_positive_offset = dataframe['atr'] * atr_multiplier
+        pass
