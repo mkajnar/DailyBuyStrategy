@@ -633,7 +633,7 @@ class HPStrategyDCA(HPStrategy):
         return None
 
 
-class HPStrategyDCA_FLRSI(HPStrategy):
+class HPStrategyDCA_FLRSI(HPStrategyDCA):
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI 1.0"
 
