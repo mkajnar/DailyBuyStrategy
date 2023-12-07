@@ -640,20 +640,15 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
 
-        # Upravení rsi_fast hodnoty pomocí koeficientu
-        adjusted_rsi_fast = dataframe['rsi_fast'] * 1.05
+        adjusted_rsi_fast = dataframe['rsi_fast'] * 1.5
+        adjusted_rsi_fast_shifted = dataframe['rsi_fast'].shift(1) * 1.1
 
         # Vytvoření podmínky, kdy upravený rsi_fast právě překročil rsi_slow
         rsi_crossover = (
-                (dataframe['rsi_fast'].shift(1) < dataframe['rsi_slow'].shift(
-                    1)) &  # V předchozím kroku byl rsi_fast pod rsi_slow
-                (adjusted_rsi_fast > dataframe['rsi_slow'])  # Nyní je upravený rsi_fast nad rsi_slow
+                (adjusted_rsi_fast_shifted < dataframe['rsi_slow'].shift(1)) &
+                (adjusted_rsi_fast > dataframe['rsi_slow'])
         )
-
-        # Přidání tagu
         dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
-
-        # Nastavení nákupního signálu
         dataframe.loc[rsi_crossover, 'buy'] = 1
 
         return dataframe
