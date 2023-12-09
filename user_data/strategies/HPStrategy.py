@@ -813,7 +813,19 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
 
     @staticmethod
     def verify_last_sell_order(trade: Trade):
-        return any(order.side == 'sell' for order in reversed(trade.orders))
+        if last_sell_order := next(
+                (
+                        order
+                        for order in sorted(
+                    trade.orders, key=lambda x: x.order_date, reverse=True
+                )
+                        if order.ft_order_side == 'sell' and order.status == 'closed'
+                ),
+                None,
+        ):
+            return True
+        else:
+            return False
 
     def save_sell_value_info(self):
         user_data_directory = os.path.join('user_data')
