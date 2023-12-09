@@ -780,3 +780,48 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         dataframe.loc[down_trend, 'buy'] = 0
 
         return dataframe
+
+
+class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
+
+    def __init__(self):
+        super().__init__()
+        self.sell_value_info_file = 'sell_value_info.json'
+        self.sell_value_info = self.load_sell_value_info()
+
+    def version(self) -> str:
+        return "HPStrategyDCA_FLRSI_CP 1.8"
+
+    def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                              current_rate: float, current_profit: float, min_stake: float,
+                              max_stake: float, **kwargs):
+
+        currency_pair = trade.pair
+
+        if current_rate > trade.open_rate:
+            if (current_time - trade.open_date_utc > timedelta(hours=4)
+                    and current_profit < -2
+                    and currency_pair not in self.sell_value_info):
+                sell_value = trade.stake_amount / 2
+                self.sell_value_info[currency_pair] = sell_value
+                self.save_sell_value_info()
+                return -sell_value
+        elif self.verify_last_sell_order(trade.orders) and currency_pair in self.sell_value_info:
+            value = self.sell_value_info.pop(currency_pair)
+            self.save_sell_value_info()
+            return value
+
+    @staticmethod
+    def verify_last_sell_order(trade: Trade):
+        return any(order.side == 'sell' for order in reversed(trade.orders))
+
+    def save_sell_value_info(self):
+        with open(self.sell_value_info_file, 'w') as file:
+            json.dump(self.sell_value_info, file)
+
+    def load_sell_value_info(self):
+        try:
+            with open(self.sell_value_info_file, 'r') as file:
+                return json.load(file)
+        except FileNotFoundError:
+            return {}
