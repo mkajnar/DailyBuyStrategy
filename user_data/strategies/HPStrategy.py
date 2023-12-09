@@ -347,10 +347,23 @@ class HPStrategy(IStrategy):
         dataframe['drawdown'] = (dataframe['rolling_max'] - dataframe['low']) / dataframe['rolling_max']
         dataframe['below_90_percent_drawdown'] = dataframe['drawdown'] >= 0.90
 
+        # MACD výpočet
         macd = ta.MACD(dataframe)
         dataframe['macd'] = macd['macd']
         dataframe['macdsignal'] = macd['macdsignal']
+
+        # Výpočet volatility pomocí ATR nebo standardní odchylky
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
+        dataframe['volatility'] = dataframe['close'].rolling(window=14).std()
+
+        # Normalizace volatility do rozsahu, který bude použit pro úpravu citlivosti MACD
+        # Můžete například použít z-score nebo jinou metodu pro normalizaci
+        dataframe['volatility_factor'] = (dataframe['volatility'] - dataframe['volatility'].min()) / \
+                                         (dataframe['volatility'].max() - dataframe['volatility'].min())
+
+        # Zvolte koeficienty pro citlivost na základě volatility
+        dataframe['macd_adjusted'] = dataframe['macd'] * (1 - dataframe['volatility_factor'])
+        dataframe['macdsignal_adjusted'] = dataframe['macdsignal'] * (1 + dataframe['volatility_factor'])
 
         # dataframe.drop_duplicates()
         return dataframe
@@ -733,24 +746,33 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         #     'buy'] = 1
 
         # Koeficient pro anticipaci křížení
-        macd_coefficient = 0.90
-        macdsignal_coefficient = 1.1
+
+        # macd_coefficient = 0.95
+        # macdsignal_coefficient = 1.05
+
+        # dataframe.loc[
+        #     (
+        #             (dataframe['macd'] * macd_coefficient <= dataframe[
+        #                 'macdsignal'] * macdsignal_coefficient) |  # MACD se blíží k signální linii
+        #             (dataframe['macd'] <= 0)  # MACD je pod 0
+        #     ), 'buy'] = 0  # Zrušení nákupního signálu
 
         dataframe.loc[
             (
-                    (dataframe['macd'] * macd_coefficient <= dataframe[
-                        'macdsignal'] * macdsignal_coefficient) |  # MACD se blíží k signální linii
+                    (dataframe['macd_adjusted'] <= dataframe[
+                        'macdsignal_adjusted']) |  # Upřednostnění křížení směrem dolů s větší citlivostí po pádu
                     (dataframe['macd'] <= 0)  # MACD je pod 0
-            ), 'buy'] = 0  # Zrušení nákupního signálu
+            ),
+            'buy'] = 0  # Zrušení nákupního signálu
 
         # Podobně pro ATR můžeme použít koeficient pro určení, kdy se hodnota ATR blíží k překročení prahu
-        atr_coefficient = 1.1  # Například 10% nad aktuální hodnotou ATR
-        atr_threshold = 0.003  # Prah by měl být upraven podle backtestingu
-
-        dataframe.loc[
-            (
-                (dataframe['atr'] * atr_coefficient > atr_threshold)  # ATR se blíží k překročení prahu
-            ), 'buy'] = 0  # Zrušení nákupního signálu
+        # atr_coefficient = 1.1  # Například 10% nad aktuální hodnotou ATR
+        # atr_threshold = 0.003  # Prah by měl být upraven podle backtestingu
+        #
+        # dataframe.loc[
+        #     (
+        #         (dataframe['atr'] * atr_coefficient > atr_threshold)  # ATR se blíží k překročení prahu
+        #     ), 'buy'] = 0  # Zrušení nákupního signálu
 
         down_trend = (
             (dataframe['higher_tf_trend'] < 0)
