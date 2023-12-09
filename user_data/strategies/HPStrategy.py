@@ -683,7 +683,7 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
     trailing_only_offset_is_reached = True
 
     def version(self) -> str:
-        return "HPStrategyDCA_FLRSI 1.7"
+        return "HPStrategyDCA_FLRSI 1.8"
 
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                         current_profit: float, **kwargs) -> float:
@@ -719,18 +719,38 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         )
         dataframe.loc[up_trend, 'buy'] = 1
 
-        dataframe.loc[
-            (
-                    (qtpylib.crossed_above(dataframe['macd'], dataframe['macdsignal'])) &
-                    (dataframe['macd'] > 0)
-            ), 'buy'] = 1
+        # dataframe.loc[
+        #     (
+        #             (qtpylib.crossed_above(dataframe['macd'], dataframe['macdsignal'])) &
+        #             (dataframe['macd'] > 0)
+        #     ), 'buy'] = 1
+        #
+        # atr_threshold = 0.001  # Tento práh by měl být nastaven podle backtestingu
+        # dataframe.loc[
+        #     (
+        #         (dataframe['atr'] < atr_threshold)
+        #     ),
+        #     'buy'] = 1
 
-        atr_threshold = 0.001  # Tento práh by měl být nastaven podle backtestingu
+        # Koeficient pro anticipaci křížení
+        macd_coefficient = 0.95
+        macdsignal_coefficient = 1.05
+
         dataframe.loc[
             (
-                (dataframe['atr'] < atr_threshold)
-            ),
-            'buy'] = 1
+                    (dataframe['macd'] * macd_coefficient <= dataframe[
+                        'macdsignal'] * macdsignal_coefficient) |  # MACD se blíží k signální linii
+                    (dataframe['macd'] <= 0)  # MACD je pod 0
+            ), 'buy'] = 0  # Zrušení nákupního signálu
+
+        # Podobně pro ATR můžeme použít koeficient pro určení, kdy se hodnota ATR blíží k překročení prahu
+        atr_coefficient = 1.1  # Například 10% nad aktuální hodnotou ATR
+        atr_threshold = 0.001  # Prah by měl být upraven podle backtestingu
+
+        dataframe.loc[
+            (
+                (dataframe['atr'] * atr_coefficient > atr_threshold)  # ATR se blíží k překročení prahu
+            ), 'buy'] = 0  # Zrušení nákupního signálu
 
         down_trend = (
             (dataframe['higher_tf_trend'] < 0)
