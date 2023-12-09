@@ -793,6 +793,18 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
 
+        last_order_is_sell = bool(
+            last_sell_order := next(
+                (
+                    order
+                    for order in sorted(
+                    trade.orders, key=lambda x: x.order_date, reverse=True
+                )
+                    if order.ft_order_side == 'sell' and order.status == 'closed'
+                ),
+                None,
+            ))
+
         currency_pair = trade.pair
 
         if self.sell_value_info is None:
@@ -806,25 +818,10 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
                 self.sell_value_info[currency_pair] = sell_value
                 self.save_sell_value_info()
                 return -sell_value
-        elif self.verify_last_sell_order(trade.orders) and currency_pair in self.sell_value_info:
+        elif last_order_is_sell and currency_pair in self.sell_value_info:
             value = self.sell_value_info.pop(currency_pair)
             self.save_sell_value_info()
             return value
-
-    @staticmethod
-    def verify_last_sell_order(trade: Trade):
-        return bool(
-            last_sell_order := next(
-                (
-                    order
-                    for order in sorted(
-                        trade.orders, key=lambda x: x.order_date, reverse=True
-                    )
-                    if order.ft_order_side == 'sell' and order.status == 'closed'
-                ),
-                None,
-            )
-        )
 
     def save_sell_value_info(self):
         user_data_directory = os.path.join('user_data')
