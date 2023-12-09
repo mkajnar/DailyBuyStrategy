@@ -783,11 +783,8 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
 
 
 class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
-
-    def __init__(self):
-        super().__init__()
-        self.sell_value_info_file = 'sell_value_info.json'
-        self.sell_value_info = self.load_sell_value_info()
+    sell_value_info_file = 'sell_value_info.json'
+    sell_value_info = None
 
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI_CP 1.8"
@@ -797,6 +794,9 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
                               max_stake: float, **kwargs):
 
         currency_pair = trade.pair
+
+        if self.sell_value_info is None:
+            self.sell_value_info = self.load_sell_value_info()
 
         if current_rate > trade.open_rate:
             if (current_time - trade.open_date_utc > timedelta(hours=4)
@@ -813,19 +813,18 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
 
     @staticmethod
     def verify_last_sell_order(trade: Trade):
-        if last_sell_order := next(
+        return bool(
+            last_sell_order := next(
                 (
-                        order
-                        for order in sorted(
-                    trade.orders, key=lambda x: x.order_date, reverse=True
-                )
-                        if order.ft_order_side == 'sell' and order.status == 'closed'
+                    order
+                    for order in sorted(
+                        trade.orders, key=lambda x: x.order_date, reverse=True
+                    )
+                    if order.ft_order_side == 'sell' and order.status == 'closed'
                 ),
                 None,
-        ):
-            return True
-        else:
-            return False
+            )
+        )
 
     def save_sell_value_info(self):
         user_data_directory = os.path.join('user_data')
