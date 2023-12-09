@@ -816,12 +816,14 @@ class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
         return any(order.side == 'sell' for order in reversed(trade.orders))
 
     def save_sell_value_info(self):
-        with open(self.sell_value_info_file, 'w') as file:
+        user_data_directory = os.path.join('user_data')
+        with open(os.path.join(user_data_directory, self.sell_value_info_file), 'w') as file:
             json.dump(self.sell_value_info, file)
 
     def load_sell_value_info(self):
         try:
-            with open(self.sell_value_info_file, 'r') as file:
+            user_data_directory = os.path.join('user_data')
+            with open(os.path.join(user_data_directory, self.sell_value_info_file), 'r') as file:
                 return json.load(file)
         except FileNotFoundError:
             return {}
