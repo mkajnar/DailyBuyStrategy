@@ -480,7 +480,7 @@ class HPStrategyDCA(HPStrategy):
     initial_safety_order_trigger = -0.018
     safety_order_step_scale = 1.2
     safety_order_volume_scale = 1.4
-    drawdown_limit = -3.5
+    drawdown_limit = -2
     buy_params = {
         "dca_min_rsi": 35,
     }
@@ -733,8 +733,8 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         #     'buy'] = 1
 
         # Koeficient pro anticipaci křížení
-        macd_coefficient = 0.95
-        macdsignal_coefficient = 1.05
+        macd_coefficient = 0.90
+        macdsignal_coefficient = 1.1
 
         dataframe.loc[
             (
@@ -745,7 +745,7 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
 
         # Podobně pro ATR můžeme použít koeficient pro určení, kdy se hodnota ATR blíží k překročení prahu
         atr_coefficient = 1.1  # Například 10% nad aktuální hodnotou ATR
-        atr_threshold = 0.001  # Prah by měl být upraven podle backtestingu
+        atr_threshold = 0.003  # Prah by měl být upraven podle backtestingu
 
         dataframe.loc[
             (
