@@ -1,25 +1,21 @@
-import os
-from pathlib import Path
-from freqtrade.strategy.interface import IStrategy
-from typing import Dict, List, Optional
-from functools import reduce
-from pandas import DataFrame
-import talib.abstract as ta
-import numpy as np
-import freqtrade.vendor.qtpylib.indicators as qtpylib
 import datetime
-from technical.util import resample_to_interval, resampled_merge
-from datetime import datetime, timedelta
-from freqtrade.persistence import Trade
-from freqtrade.strategy import stoploss_from_open, merge_informative_pair, DecimalParameter, IntParameter, \
-    CategoricalParameter
-import technical.indicators as ftt
-import math
-import logging
+import datetime
 import json
+import logging
+import math
 import os
-import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from datetime import timedelta, timezone
+from functools import reduce
+from typing import Optional
+import numpy as np
+import talib.abstract as ta
+from pandas import DataFrame
+
+import freqtrade.vendor.qtpylib.indicators as qtpylib
+from freqtrade.persistence import Trade
+from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
+from freqtrade.strategy.interface import IStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +153,6 @@ class HPStrategy(IStrategy):
 
     def version(self) -> str:
         return "HPStrategy 1.6"
-
 
     def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
@@ -351,6 +346,12 @@ class HPStrategy(IStrategy):
         dataframe['rolling_max'] = dataframe['high'].cummax()
         dataframe['drawdown'] = (dataframe['rolling_max'] - dataframe['low']) / dataframe['rolling_max']
         dataframe['below_90_percent_drawdown'] = dataframe['drawdown'] >= 0.90
+
+        macd = ta.MACD(dataframe)
+        dataframe['macd'] = macd['macd']
+        dataframe['macdsignal'] = macd['macdsignal']
+        dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
+
         # dataframe.drop_duplicates()
         return dataframe
 
@@ -420,7 +421,7 @@ class HPStrategy(IStrategy):
         # poc_condition = (
         #        (dataframe['close'] < dataframe['poc']) &
         #        (dataframe['close'] < dataframe['va_low'])
-        #)
+        # )
         if conditions:
             # combined_conditions = [poc_condition & condition for condition in conditions]
             combined_conditions = [condition for condition in conditions]
@@ -493,7 +494,7 @@ class HPStrategyDCA(HPStrategy):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
-        resampled_frame = dataframe.resample('3T', on='date').agg({
+        resampled_frame = dataframe.resample('5T', on='date').agg({
             'open': 'first',
             'high': 'max',
             'low': 'min',
@@ -576,9 +577,18 @@ class HPStrategyDCA(HPStrategy):
     def calculate_drawdown(self, current_price, last_order_price):
         return (current_price - last_order_price) / last_order_price * 100
 
+    def calculate_dca_amount(self, current_price, target_profit, average_buy_price, total_investment):
+        """
+        Vypočet částky pro Dollar-Cost Averaging.
+        """
+        target_sell_price = average_buy_price * (1 + target_profit)
+        required_price_rise = target_sell_price / current_price
+        return total_investment * (required_price_rise - 1)
+
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
+
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
             df = dataframe.copy()
@@ -589,6 +599,13 @@ class HPStrategyDCA(HPStrategy):
         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
 
+        # current_price = dataframe['close'].iloc[-1]
+        # average_buy_price = trade.open_rate
+        # total_investment = trade.amount * trade.open_rate
+        #
+        # additional_investment = self.calculate_dca_amount(current_price, 0.02, average_buy_price,
+        #                                                  total_investment)
+
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
         if last_candle['close'] < previous_candle['close']:
@@ -596,9 +613,16 @@ class HPStrategyDCA(HPStrategy):
 
         current_candle_index = df.index[-1]
 
-        last_buy_order = next((order for order in sorted(trade.orders, key=lambda x: x.order_date, reverse=True)
-                               if order.ft_order_side == 'buy' and order.status == 'closed'), None)
-        if last_buy_order:
+        if last_buy_order := next(
+                (
+                        order
+                        for order in sorted(
+                    trade.orders, key=lambda x: x.order_date, reverse=True
+                )
+                        if order.ft_order_side == 'buy' and order.status == 'closed'
+                ),
+                None,
+        ):
             last_buy_candle = dataframe.loc[dataframe['date'] == last_buy_order.order_date]
             if not last_buy_candle.empty:
                 last_buy_candle_index = last_buy_candle.index[0]
@@ -612,10 +636,17 @@ class HPStrategyDCA(HPStrategy):
 
         if self.max_safety_orders >= count_of_buys >= 1:
             last_order_price = trade.open_rate
-            last_buy_order = next((order for order in sorted(trade.orders, key=lambda x: x.order_date, reverse=True) if
-                                   order.ft_order_side == 'buy'), None)
-            if last_buy_order:
-                last_order_price = last_buy_order.price if last_buy_order.price else last_buy_order.average
+            if last_buy_order := next(
+                    (
+                            order
+                            for order in sorted(
+                        trade.orders, key=lambda x: x.order_date, reverse=True
+                    )
+                            if order.ft_order_side == 'buy'
+                    ),
+                    None,
+            ):
+                last_order_price = last_buy_order.price or last_buy_order.average
 
             drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
 
@@ -637,8 +668,6 @@ class HPStrategyDCA(HPStrategy):
                             adjusted_stake = stake_amount
                     except:
                         adjusted_stake = stake_amount
-                        pass
-
                     return adjusted_stake
 
                 except Exception as exception:
@@ -648,18 +677,21 @@ class HPStrategyDCA(HPStrategy):
 
 
 class HPStrategyDCA_FLRSI(HPStrategyDCA):
-
     trailing_stop = True
     trailing_stop_positive = 0.001
     trailing_stop_positive_offset = 0.012
     trailing_only_offset_is_reached = True
 
     def version(self) -> str:
-        return "HPStrategyDCA_FLRSI 1.6"
+        return "HPStrategyDCA_FLRSI 1.7"
+
+    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+                        current_profit: float, **kwargs) -> float:
+        return -0.025
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
-        resampled_frame = dataframe.resample('3T', on='date').agg({
+        resampled_frame = dataframe.resample('5T', on='date').agg({
             'open': 'first',
             'high': 'max',
             'low': 'min',
@@ -686,6 +718,19 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
             (dataframe['higher_tf_trend'] > 0)
         )
         dataframe.loc[up_trend, 'buy'] = 1
+
+        dataframe.loc[
+            (
+                    (qtpylib.crossed_above(dataframe['macd'], dataframe['macdsignal'])) &
+                    (dataframe['macd'] > 0)
+            ), 'buy'] = 1
+
+        atr_threshold = 0.001  # Tento práh by měl být nastaven podle backtestingu
+        dataframe.loc[
+            (
+                (dataframe['atr'] < atr_threshold)
+            ),
+            'buy'] = 1
 
         down_trend = (
             (dataframe['higher_tf_trend'] < 0)
