@@ -115,17 +115,17 @@ class HPStrategy(IStrategy):
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=True)
 
     trailing_stop = True
-    trailing_stop_positive = 0.001
-    trailing_stop_positive_offset = 0.012
+    trailing_stop_positive = 0.002
+    trailing_stop_positive_offset = 0.008
     trailing_only_offset_is_reached = True
 
     minimal_roi = {
-        "0": 0.05,
-        "10": 0.04,
-        "20": 0.03,
-        "30": 0.02,
-        "40": 0.01,
-        "50": 0
+        "0": 0.15,
+        "30": 0.10,
+        "60": 0.05,
+        "90": 0.03,
+        "120": 0.01,
+        "240": 0
     }
 
     order_types = {
