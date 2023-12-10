@@ -1,3 +1,4 @@
+import contextlib
 import datetime
 import datetime
 import json
@@ -7,7 +8,7 @@ import os
 from datetime import datetime
 from datetime import timedelta, timezone
 from functools import reduce
-from typing import Optional
+from typing import Optional, Union
 import numpy as np
 import talib.abstract as ta
 from pandas import DataFrame
@@ -64,7 +65,7 @@ class HPStrategy(IStrategy):
         return [
             {
                 "method": "CooldownPeriod",
-                "stop_duration_candles": 5
+                "stop_duration_candles": 0
             },
             {
                 "method": "MaxDrawdown",
@@ -104,7 +105,7 @@ class HPStrategy(IStrategy):
     highest_prices = {}
     price_drop_percentage = {}
     pairs_close_to_high = []
-    locked = []
+    # locked = []
     stoploss = -0.99
     base_nb_candles_buy = IntParameter(8, 20, default=buy_params['base_nb_candles_buy'], space='buy', optimize=False)
     base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell',
@@ -194,18 +195,18 @@ class HPStrategy(IStrategy):
 
         self.pairs_close_to_high = list(set(self.pairs_close_to_high))
 
-        if price_to_mid_ratio > 0.5:
-            if pair not in self.pairs_close_to_high:
-                self.pairs_close_to_high.append(pair)
-                if pair in self.locked:
-                    self.locked.remove(pair)
-        else:
-            if pair in self.pairs_close_to_high:
-                self.pairs_close_to_high.remove(pair)
-                if pair not in self.locked:
-                    logging.info(f"Locking {pair}")
-                    self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
-                    self.locked.append(pair)
+        # if price_to_mid_ratio > 0.5:
+        #     if pair not in self.pairs_close_to_high:
+        #         self.pairs_close_to_high.append(pair)
+        #         if pair in self.locked:
+        #             self.locked.remove(pair)
+        # else:
+        #     if pair in self.pairs_close_to_high:
+        #         self.pairs_close_to_high.remove(pair)
+        #         if pair not in self.locked:
+        #             logging.info(f"Locking {pair}")
+        #             self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
+        #             self.locked.append(pair)
 
         user_data_directory = os.path.join('user_data')
         if not os.path.exists(user_data_directory):
@@ -536,8 +537,7 @@ class HPStrategyDCA(HPStrategy):
             raise ValueError("Neplatný timeframe. Prosím, zadejte jeden z podporovaných timeframe.")
         periods = int(24 * 60 / interval_in_minutes)
         dataframe['pct_change'] = dataframe['close'].pct_change()
-        avg_volatility = dataframe['pct_change'].tail(periods).abs().mean() * 100
-        return avg_volatility
+        return dataframe['pct_change'].tail(periods).abs().mean() * 100
 
     def dynamic_stake_adjustment(self, stake, volatility):
         if volatility > 0.05:  # Příklad: vyšší volatilita => menší sázky
@@ -782,56 +782,75 @@ class HPStrategyDCA_FLRSI(HPStrategyDCA):
         return dataframe
 
 
-class HPStrategyDCA_FLRSI_CP(HPStrategyDCA):
+def load_sell_value_info(sell_value_info_file):
+    logging.info("Loading sell value info")
+    try:
+        user_data_directory = os.path.join('user_data')
+        with open(os.path.join(user_data_directory, sell_value_info_file), 'r') as file:
+            return json.load(file)
+    except FileNotFoundError:
+        return {}
+
+
+def save_sell_value_info(sell_value_info_file, sell_value_info):
+    logging.info("Saving sell value info")
+    user_data_directory = os.path.join('user_data')
+    with open(os.path.join(user_data_directory, sell_value_info_file), 'w') as file:
+        json.dump(sell_value_info, file)
+
+
+class HPStrategyDCA_FLRSI_CP(HPStrategyDCA_FLRSI):
     sell_value_info_file = 'sell_value_info.json'
-    sell_value_info = None
+    remember = {}
+    try:
+        remember = load_sell_value_info(sell_value_info_file)
+    except:
+        pass
 
     def version(self) -> str:
         return "HPStrategyDCA_FLRSI_CP 1.8"
+
+    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+                    current_profit: float, **kwargs):
+        if pair in self.remember:
+            logging.info(f"Setting sell value for {pair}: True")
+            return 'unclog'
+
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
+        dataframe = super().populate_buy_trend(dataframe, metadata)
+        pair = metadata['pair']
+
+        if pair in self.remember.keys():
+            logging.info(f"Found {pair} for rebuy")
+            self.remember.pop(pair)
+            dataframe.loc[(dataframe['rsi'] > 0), 'buy'] = 1
+            save_sell_value_info(self.sell_value_info_file, self.remember)
+            logging.info(f"Removing {pair} from rebuy")
+
+        return dataframe
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
 
-        last_order_is_sell = bool(
-            last_sell_order := next(
-                (
-                    order
-                    for order in sorted(
-                    trade.orders, key=lambda x: x.order_date, reverse=True
-                )
-                    if order.ft_order_side == 'sell' and order.status == 'closed'
-                ),
-                None,
-            ))
-
-        currency_pair = trade.pair
-
-        if self.sell_value_info is None:
-            self.sell_value_info = self.load_sell_value_info()
-
-        if current_rate > trade.open_rate:
-            if (current_time - trade.open_date_utc > timedelta(hours=4)
-                    and current_profit < -2
-                    and currency_pair not in self.sell_value_info):
-                sell_value = trade.stake_amount / 2
-                self.sell_value_info[currency_pair] = sell_value
-                self.save_sell_value_info()
-                return -sell_value
-        elif last_order_is_sell and currency_pair in self.sell_value_info:
-            value = self.sell_value_info.pop(currency_pair)
-            self.save_sell_value_info()
-            return value
-
-    def save_sell_value_info(self):
-        user_data_directory = os.path.join('user_data')
-        with open(os.path.join(user_data_directory, self.sell_value_info_file), 'w') as file:
-            json.dump(self.sell_value_info, file)
-
-    def load_sell_value_info(self):
+        df = None
         try:
-            user_data_directory = os.path.join('user_data')
-            with open(os.path.join(user_data_directory, self.sell_value_info_file), 'r') as file:
-                return json.load(file)
-        except FileNotFoundError:
-            return {}
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            df = dataframe.copy()
+        except Exception as e:
+            return None
+
+        last_candle = df.iloc[-1].squeeze()
+        previous_candle = df.iloc[-2].squeeze()
+        volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
+        logging.info(f"Average volatility for {trade.pair} is {volatility}")
+
+        x = [volatility * 0.3, 0.05]
+        if (last_candle['close'] > previous_candle['close']
+                and ((current_profit < -(max(x)))
+                     and (current_time - trade.open_date_utc) >= timedelta(hours=4))):
+            self.remember[trade.pair] = True
+            save_sell_value_info(self.sell_value_info_file, self.remember)
+
+        return super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake, max_stake)
