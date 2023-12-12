@@ -509,7 +509,10 @@ class HPStrategy(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        sell_reason = f"{sell_reason}_" + trade.buy_tag
+        try:
+            sell_reason = f"{sell_reason}_" + trade.buy_tag
+        except:
+            pass
         current_profit = trade.calc_profit_ratio(rate)
         return (
                 current_profit >= self.sell_profit_offset
