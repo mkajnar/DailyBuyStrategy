@@ -839,9 +839,11 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy'] = 1
+        dataframe.loc[(dataframe['rsi'] <= 40), 'buy_tag'] += 'rsi_lower40_'
         dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
         dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
         dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
+        dataframe.loc[(dataframe['our'] > 0), 'buy_tag'] += 'our_signal_'
         dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
         return dataframe
 
