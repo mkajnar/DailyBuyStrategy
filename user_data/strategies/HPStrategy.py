@@ -809,11 +809,16 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     INTERFACE_VERSION = 2
     minimal_roi = {
-        "0": 0.01
+        "0": 0.10,
+        "15": 0.05,
+        "40": 0.03,
+        "60": 0.02,
+        "90": 0.01,
+        "120": 0.00
     }
     trailing_stop = True
-    trailing_stop_positive = 0.005
-    trailing_stop_positive_offset = 0.01
+    trailing_stop_positive = 0.01
+    trailing_stop_positive_offset = 0.03
     trailing_only_offset_is_reached = True
 
     def version(self) -> str:
