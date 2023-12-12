@@ -869,6 +869,6 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         dataframe_tuple = self.dp.get_analyzed_dataframe(pair=trade.pair, timeframe=self.timeframe)
         dataframe = dataframe_tuple[0]
         last_candle = dataframe.iloc[-1]
-        if last_candle['is_downtrend'] | dataframe['rapid_fall']:
+        if last_candle['is_downtrend'] | last_candle['rapid_fall']:
             return None
         return super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake, max_stake)
