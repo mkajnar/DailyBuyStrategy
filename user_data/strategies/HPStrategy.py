@@ -804,61 +804,44 @@ class HPStrategyRsiVolAtr(HPStrategyDCA):
         return None
 
 
-class HPStrategyEMA(HPStrategyTF):
-    
+class HPStrategyBlockDowntrend(HPStrategyDCA):
+    # Jméno strategie
+
     INTERFACE_VERSION = 2
     minimal_roi = {
-        "0": 3.5
+        "0": 0.01
     }
+    trailing_stop = True
+    trailing_stop_positive = 0.005
+    trailing_stop_positive_offset = 0.01
+    trailing_only_offset_is_reached = True
 
     def version(self) -> str:
-        return f"{super().version()} EMA "
+        return f"{super().version()} BlockDowntrend "
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
-
-        dataframe['ema7'] = ta.EMA(dataframe, timeperiod=7)
-        dataframe['ema9'] = ta.EMA(dataframe, timeperiod=9)
-        dataframe['ema14'] = ta.EMA(dataframe, timeperiod=14)
-        dataframe['ema21'] = ta.EMA(dataframe, timeperiod=21)
-        dataframe['ema50'] = ta.EMA(dataframe, timeperiod=50)
-        dataframe['ema100'] = ta.EMA(dataframe, timeperiod=100)
-        dataframe['stoploss'] = dataframe['close'] * (1 - self.stoploss)
-
-        dataframe.loc[(dataframe['ema7'] < dataframe['ema9']), 'stop_buy'] = 1
-        dataframe.loc[(dataframe['ema7'] > dataframe['ema9']), 'stop_buy'] = 0
-
-        dataframe.loc[(dataframe['rsi'] > 80), 'stop_buy'] = 1
-        dataframe.loc[(dataframe['rsi'] < 80), 'stop_buy'] = 0
-
+        # Detekce sestupného trendu
+        dataframe['is_downtrend'] = (dataframe.shift(-12)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-10)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-8)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-6)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-4)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-2)['close'] < dataframe['open'])
+        # dataframe['is_downtrend'] = (dataframe.shift(-1)['close'] < dataframe['open'])
+        dataframe.loc[(dataframe['is_downtrend'] == False) & (dataframe['bullish_divergence'] > 0), 'our'] = 1
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe = super().populate_buy_trend(dataframe, metadata)
-
-        is_price_crossing_ema_up = (qtpylib.crossed_above(dataframe['ema7'], dataframe['ema100'])
-                                    | qtpylib.crossed_above(dataframe['ema7'], dataframe['ema50']))
-
-        dataframe['buy_tag'] = ''
-        dataframe.loc[is_price_crossing_ema_up, 'buy_tag'] += 'crossing_ema_up_'
-        dataframe.loc[
-            (
-                is_price_crossing_ema_up
-            ),
-            'buy'] = 1
-
-        dataframe.loc[dataframe['stop_buy'] > 0, 'buy'] = 0
+        dataframe.loc[:, 'buy'] = 1
+        dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
+        dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
+        dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
+        dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['sell_tag'] = ''
-        sell_condition = (
-                (dataframe['ema7'] < dataframe['ema9']) &
-                (dataframe['ema9'] < dataframe['ema14']) &
-                (dataframe['close'] > dataframe['open'])
-        )
-        dataframe.loc[sell_condition, 'sell_tag'] += 'crossing_ema_down_'
-        dataframe.loc[sell_condition, 'sell'] = 1
+        dataframe = super().populate_sell_trend(dataframe, metadata)
         return dataframe
 
     def custom_stop_loss(self, pair, bought_price, current_price, current_time):
@@ -871,7 +854,6 @@ class HPStrategyEMA(HPStrategyTF):
         dataframe_tuple = self.dp.get_analyzed_dataframe(pair=trade.pair, timeframe=self.timeframe)
         dataframe = dataframe_tuple[0]
         last_candle = dataframe.iloc[-1]
-        if last_candle['stop_buy'] > 0:
+        if last_candle['is_downtrend']:
             return None
-
         return super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake, max_stake)
