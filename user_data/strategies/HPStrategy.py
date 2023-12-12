@@ -843,6 +843,11 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        current_pair = metadata['pair']
+        open_trades = Trade.get_open_trades()
+        if any(trade.pair == current_pair for trade in open_trades):
+            return dataframe
+
         dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
         dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
         dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
