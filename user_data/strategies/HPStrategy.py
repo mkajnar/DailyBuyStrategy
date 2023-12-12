@@ -838,16 +838,16 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         # dataframe['is_downtrend'] = (dataframe.shift(-2)['close'] < dataframe['open'])
         # dataframe['is_downtrend'] = (dataframe.shift(-1)['close'] < dataframe['open'])
         dataframe.loc[(dataframe['is_downtrend'] == False) & (dataframe['bullish_divergence'] > 0), 'our'] = 1
+        dataframe['buy'] = 1
+        dataframe['buy_tag'] = ''
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[:, 'buy'] = 1
-        dataframe.loc[(dataframe['rsi'] <= 40), 'buy_tag'] += 'rsi_lower40_'
         dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
         dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
         dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
-        dataframe.loc[(dataframe['our'] > 0), 'buy_tag'] += 'our_signal_'
         dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
+        dataframe.loc[(dataframe['our'] > 0), 'buy_tag'] += 'our_signal_'
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
