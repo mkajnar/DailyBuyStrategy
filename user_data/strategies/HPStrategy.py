@@ -805,31 +805,10 @@ class HPStrategyRsiVolAtr(HPStrategyDCA):
 
 
 class HPStrategyEMA(HPStrategyTF):
-    # Jméno strategie
-
-    force_buy_list = []
-
+    
     INTERFACE_VERSION = 2
     minimal_roi = {
         "0": 3.5
-    }
-
-    # Popis strategie
-    stoploss = -0.99
-    trailing_stop = True
-    trailing_stop_positive = 0.02
-    trailing_stop_positive_offset = 0.05
-    trailing_only_offset_is_reached = True
-    use_custom_stoploss = True
-    use_sell_signal = True
-    use_exit_signal = True
-
-    buy_params = {
-        "rsi-value": 30
-    }
-
-    sell_params = {
-        "rsi-value": 70
     }
 
     def version(self) -> str:
@@ -856,10 +835,6 @@ class HPStrategyEMA(HPStrategyTF):
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_buy_trend(dataframe, metadata)
-
-        if metadata['pair'] in self.force_buy_list:
-            dataframe.loc[:, 'buy_tag'] += 'buy_signal_after_sell_'
-            dataframe.loc[:, 'buy'] = 1
 
         is_price_crossing_ema_up = (qtpylib.crossed_above(dataframe['ema7'], dataframe['ema100'])
                                     | qtpylib.crossed_above(dataframe['ema7'], dataframe['ema50']))
@@ -889,27 +864,6 @@ class HPStrategyEMA(HPStrategyTF):
     def custom_stop_loss(self, pair, bought_price, current_price, current_time):
         roi = (current_price / bought_price) - 1
         return current_price if roi <= -0.035 else bought_price
-
-    def custom_sell(self, pair: str, trade: 'Trade', current_time: 'datetime',
-                    current_rate: float, current_profit: float, **kwargs) -> str:
-
-        logging.info(f"Custom sell, current profit: {current_profit}")
-        dataframe = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-
-        if dataframe.iloc[-1]['date'].to_pydatetime() < current_time:
-            logging.info("Last candle is older than current time, not selling")
-            return None
-
-        rsi_signal = (
-                (dataframe.iloc[-1]['rsi'] >= 15) &
-                (dataframe.iloc[-1]['rsi'] <= 50)
-        )
-
-        if current_profit > 0.005 and rsi_signal:
-            logging.info("Sell signal based on rsi")
-            self.force_buy_list.append(pair)
-            return 'sell_signal_based_on_rsi_volume'
-        return None
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
