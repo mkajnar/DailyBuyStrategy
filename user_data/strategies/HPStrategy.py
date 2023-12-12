@@ -834,14 +834,14 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         dataframe['sma'] = ta.SMA(dataframe, timeperiod=20)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
         dataframe['rapid_fall'] = ((dataframe['close'] < dataframe['sma'] * 0.95)
-                                   & (dataframe['atr'] > dataframe['atr'].rolling(window=14).mean() * 1.5))
+                                   & (dataframe['atr'] > dataframe['atr'].rolling(window=14).mean() * 1.2))
         dataframe['is_downtrend'] = (dataframe['rsi_fast'] < dataframe['rsi_slow']).astype(int)
         dataframe['our'] = (
                             (dataframe['rsi'] >= 20) &
                             (dataframe['rsi'] <= 70) &
                             (dataframe['is_downtrend'] == 0) &
                             (~dataframe['rapid_fall']) &
-                            (dataframe['bullish_divergence'] == 1)).astype(int)
+                            (dataframe['close'] > dataframe['close'].shift(1) * 1.005)).astype(int)
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -861,7 +861,7 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     def custom_stop_loss(self, pair, bought_price, current_price, current_time):
         roi = (current_price / bought_price) - 1
-        return current_price if roi <= -0.035 else bought_price
+        return current_price if roi <= -0.05 else bought_price
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
@@ -869,6 +869,6 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         dataframe_tuple = self.dp.get_analyzed_dataframe(pair=trade.pair, timeframe=self.timeframe)
         dataframe = dataframe_tuple[0]
         last_candle = dataframe.iloc[-1]
-        if last_candle['is_downtrend']:
+        if last_candle['is_downtrend'] | dataframe['rapid_fall']:
             return None
         return super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake, max_stake)
