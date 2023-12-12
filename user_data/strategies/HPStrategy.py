@@ -24,7 +24,7 @@ def pct_change(a, b):
 
 
 def load_sell_value_info(sell_value_info_file):
-    logging.info("Loading sell value info")
+    # logging.info("Loading sell value info")
     try:
         user_data_directory = os.path.join('user_data')
         with open(os.path.join(user_data_directory, sell_value_info_file), 'r') as file:
@@ -34,7 +34,7 @@ def load_sell_value_info(sell_value_info_file):
 
 
 def save_sell_value_info(sell_value_info_file, sell_value_info):
-    logging.info("Saving sell value info")
+    # logging.info("Saving sell value info")
     user_data_directory = os.path.join('user_data')
     with open(os.path.join(user_data_directory, sell_value_info_file), 'w') as file:
         json.dump(sell_value_info, file)
@@ -235,7 +235,7 @@ class HPStrategy(IStrategy):
         elif pair in self.pairs_close_to_high:
             self.pairs_close_to_high.remove(pair)
             if pair not in self.locked:
-                logging.info(f"Locking {pair}")
+                # logging.info(f"Locking {pair}")
                 self.lock_pair(pair, until=datetime.now(timezone.utc) + timedelta(minutes=5))
                 self.locked.append(pair)
 
@@ -285,7 +285,7 @@ class HPStrategy(IStrategy):
             logging.error(str(ex))
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        logging.info("Populating indicators")
+        # logging.info("Populating indicators")
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -542,7 +542,7 @@ class HPStrategyDCA(HPStrategy):
         return dataframe
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
-        logging.info("Calculating volatility")
+        # logging.info("Calculating volatility")
         timeframes_in_minutes = {
             '1m': 1,
             '5m': 5,
@@ -562,15 +562,15 @@ class HPStrategyDCA(HPStrategy):
         return dataframe['pct_change'].tail(periods).abs().mean() * 100
 
     def dynamic_stake_adjustment(self, stake, volatility):
-        logging.info("Adjusting stake dynamically")
+        # logging.info("Adjusting stake dynamically")
         return stake * 0.8 if volatility > 0.05 else stake
 
     def calculate_drawdown(self, current_price, last_order_price):
-        logging.info("Calculating drawdown")
+        # logging.info("Calculating drawdown")
         return (current_price - last_order_price) / last_order_price * 100
 
     def calculate_dca_amount(self, current_price, target_profit, average_buy_price, total_investment):
-        logging.info("Calculating DCA amount")
+        # logging.info("Calculating DCA amount")
         target_sell_price = average_buy_price * (1 + target_profit)
         required_price_rise = target_sell_price / current_price
         return total_investment * (required_price_rise - 1)
@@ -579,7 +579,7 @@ class HPStrategyDCA(HPStrategy):
                              low_offset,
                              ewo_high, rsi_buy, base_nb_candles_sell, high_offset, ewo_low, buy_ema_cofi, buy_fastk,
                              buy_fastd, buy_adx, buy_ewo_high, last_candle, previous_candle):
-        logging.info("Checking buy conditions")
+        # logging.info("Checking buy conditions")
         lambo2 = (
                 (last_candle['close'] < (last_candle['ema_14'] * lambo2_ema_14_factor.value)) &
                 (last_candle['rsi_4'] < int(lambo2_rsi_4_limit.value)) &
@@ -623,7 +623,7 @@ class HPStrategyDCA(HPStrategy):
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
-        logging.info("Adjusting trade position")
+        # logging.info("Adjusting trade position")
 
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
