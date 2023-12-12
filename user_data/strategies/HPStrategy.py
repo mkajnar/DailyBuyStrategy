@@ -829,30 +829,30 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
-        # Detekce sestupného trendu
-        dataframe['is_downtrend'] = (dataframe.shift(-12)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-10)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-8)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-6)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-4)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-2)['close'] < dataframe['open'])
-        # dataframe['is_downtrend'] = (dataframe.shift(-1)['close'] < dataframe['open'])
-        dataframe.loc[(dataframe['is_downtrend'] == False) & (dataframe['bullish_divergence'] > 0), 'our'] = 1
-        dataframe['buy'] = 1
-        dataframe['buy_tag'] = ''
+        dataframe.loc[:, 'buy'] = 0
+        dataframe.loc[:, 'buy_tag'] = ''
+        dataframe['sma'] = ta.SMA(dataframe, timeperiod=20)
+        dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
+        dataframe['rapid_fall'] = ((dataframe['close'] < dataframe['sma'] * 0.95)
+                                   & (dataframe['atr'] > dataframe['atr'].rolling(window=14).mean() * 1.5))
+        dataframe['is_downtrend'] = (dataframe['rsi_fast'] < dataframe['rsi_slow']).astype(int)
+        dataframe['our'] = (
+                            (dataframe['rsi'] >= 20) &
+                            (dataframe['rsi'] <= 70) &
+                            (dataframe['is_downtrend'] == 0) &
+                            (~dataframe['rapid_fall']) &
+                            (dataframe['bullish_divergence'] == 1)).astype(int)
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        current_pair = metadata['pair']
-        open_trades = Trade.get_open_trades()
-        if any(trade.pair == current_pair for trade in open_trades):
-            return dataframe
-
-        dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
-        dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
-        dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
-        dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
-        dataframe.loc[(dataframe['our'] > 0), 'buy_tag'] += 'our_signal_'
+        # current_pair = metadata['pair']
+        # open_trades = Trade.get_open_trades()
+        # if any(trade.pair == current_pair for trade in open_trades):
+        #     return dataframe
+        # Podmínka pro nákup
+        cond = (dataframe['our'] == 1)
+        dataframe.loc[cond, 'buy'] = 1
+        dataframe.loc[cond, 'buy_tag'] += 'our_signal_'
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
