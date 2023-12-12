@@ -50,25 +50,50 @@
             "enableRateLimit": true,
             "timeout": 60000
         },
-        "pair_whitelist": [
-           "CREDI/USDT",
-           "BULL/USDT",
-           "MARS4/USDT",
-           "NHCT/USDT",
-           "MLS/USDT",
-           "NORD/USDT",
-           "XTAG/USDT",
-           "HAKA/USDT",
-           "PBR/USDT",
-           "1EARTH/USDT",
-           "BTC/USDT"
-        ],
-        "pair_blacklist": []
+        "pair_whitelist":
+           [
+             "ETH/USDT", "BTC/USDT", "SOL/USDT", "ADA/USDT", "AVAX/USDT", "XRP/USDT", "DOGE/USDT", "LINK/USDT", "FTM/USDT", "MATIC/USDT", "DOT/USDT", "ALGO/USDT", "INJ/USDT", "BNB/USDT", "ATOM/USDT", "ICP/USDT", "VRA/USDT", "SHIB/USDT", "FLR/USDT", "KAS/USDT", "LTC/USDT", "IMX/USDT", "ARB/USDT", "PYTH/USDT", "XMR/USDT", "RUNE/USDT", "HBAR/USDT", "AGIX/USDT", "NEAR/USDT", "FET/USDT", "DYDX/USDT", "TOMI/USDT", "RNDR/USDT", "SUI/USDT", "GALAX/USDT", "EGLD/USDT", "FTT/USDT", "FIL/USDT", "XLM/USDT", "PYR/USDT", "UNI/USDT", "NAKA/USDT", "TRX/USDT", "QNT/USDT", "AAVE/USDT", "CRO/USDT", "APE/USDT", "APT/USDT", "BCH/USDT", "BLUR/USDT"
+           ]
+        ,
+        "pair_blacklist": [".*3L.*",".*3S.*"]
     },
+    "_pairlists":
+    [
+  {
+    "method": "VolumePairList",
+    "number_assets": 300,
+    "sort_key": "quoteVolume",
+    "min_value": 5000,
+    "refresh_period": 3600,
+    "lookback_timeframe": "1m"
+  },
+  {
+    "method": "PerformanceFilter",
+    "minutes": 5,
+    "min_profit": 1
+  },
+  {
+    "method": "SpreadFilter",
+    "max_spread_ratio": 0.005
+  },
+  {
+    "method": "VolatilityFilter",
+    "lookback_days": 10,
+    "min_volatility": 0.01,
+    "max_volatility": 0.2,
+    "refresh_period": 1800
+  },
+  {
+    "method": "VolumePairList",
+    "number_assets": 50,
+    "sort_key": "quoteVolume",
+    "refresh_period": 1800
+  }
+],
     "pairlists": [
         {
             "method": "StaticPairList",
-            "number_assets": 10,
+            "number_assets": 50,
             "sort_key": "quoteVolume",
             "min_value": 0,
             "refresh_period": 1800
@@ -89,7 +114,7 @@
         "ws_token": "P3RWZvSHaCxv39j_bj7WF2OU1BJmzRujIA",
         "CORS_origins": [],
         "username": "freqtrade",
-        "password": "freqtrade"
+        "password": "Cac987321Deal."
     },
     "bot_name": "freqtrade",
     "initial_state": "running",
