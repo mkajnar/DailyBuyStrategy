@@ -804,7 +804,7 @@ class HPStrategyRsiVolAtr(HPStrategyDCA):
         return None
 
 
-class HpStrategyEMA(HPStrategyTF):
+class HPStrategyEMA(HPStrategyTF):
     # Jméno strategie
 
     force_buy_list = []
