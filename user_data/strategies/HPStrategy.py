@@ -292,18 +292,18 @@ class HPStrategy(IStrategy):
         high_max = dataframe['high'].rolling(window=14).max()
         dataframe['stoch_k'] = 100 * (dataframe['close'] - low_min) / (high_max - low_min)
         dataframe['stoch_d'] = dataframe['stoch_k'].rolling(window=3).mean()
-        cnum = 64
-        price_range = np.linspace(data_last_bbars['low'].min(), data_last_bbars['high'].max(), num=cnum)
-        vol_profile = pd.cut(data_last_bbars['close'], bins=price_range, include_lowest=True, labels=range(cnum - 1))
-        vol_by_price = data_last_bbars.groupby(vol_profile)['volume'].sum()
-        poc_index = vol_by_price.idxmax()
-        dataframe['poc'] = price_range[poc_index] if poc_index >= 0 else np.nan
-        percent = 70
-        va_threshold = vol_by_price.sum() * (percent / 100)
-        cum_vol = vol_by_price.sort_values(ascending=False).cumsum()
-        value_area = cum_vol[cum_vol <= va_threshold].index
-        dataframe['va_high'] = np.nan if value_area.empty else price_range[value_area.max()]
-        dataframe['va_low'] = np.nan if value_area.empty else price_range[value_area.min()]
+        # cnum = 64
+        # price_range = np.linspace(data_last_bbars['low'].min(), data_last_bbars['high'].max(), num=cnum)
+        # vol_profile = pd.cut(data_last_bbars['close'], bins=price_range, include_lowest=True, labels=range(cnum - 1))
+        # vol_by_price = data_last_bbars.groupby(vol_profile)['volume'].sum()
+        # poc_index = vol_by_price.idxmax()
+        # dataframe['poc'] = price_range[poc_index] if poc_index >= 0 else np.nan
+        # percent = 70
+        # va_threshold = vol_by_price.sum() * (percent / 100)
+        # cum_vol = vol_by_price.sort_values(ascending=False).cumsum()
+        # value_area = cum_vol[cum_vol <= va_threshold].index
+        # dataframe['va_high'] = np.nan if value_area.empty else price_range[value_area.max()]
+        # dataframe['va_low'] = np.nan if value_area.empty else price_range[value_area.min()]
 
         pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
@@ -462,13 +462,13 @@ class HPStrategy(IStrategy):
             dataframe['btc_rsi_8_1h'] < 35.0,
         ]
 
-        poc_condition = (
-                (dataframe['close'] < dataframe['poc']) &
-                (dataframe['close'] < dataframe['va_low'])
-        )
+        # poc_condition = (
+        #         (dataframe['close'] < dataframe['poc']) &
+        #         (dataframe['close'] < dataframe['va_low'])
+        # )
         if conditions:
-            combined_conditions = [poc_condition & condition for condition in conditions]
-            # combined_conditions = [condition for condition in conditions]
+            # combined_conditions = [poc_condition & condition for condition in conditions]
+            combined_conditions = [condition for condition in conditions]
             final_condition = reduce(lambda x, y: x | y, combined_conditions)
             dataframe.loc[final_condition, 'buy'] = 1
         if dont_buy_conditions:
@@ -829,30 +829,24 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
-        dataframe.loc[:, 'buy'] = 0
-        dataframe.loc[:, 'buy_tag'] = ''
-        dataframe['sma'] = ta.SMA(dataframe, timeperiod=20)
-        dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
-        dataframe['rapid_fall'] = ((dataframe['close'] < dataframe['sma'] * 0.95)
-                                   & (dataframe['atr'] > dataframe['atr'].rolling(window=14).mean() * 1.2))
-        dataframe['is_downtrend'] = (dataframe['rsi_fast'] < dataframe['rsi_slow']).astype(int)
-        dataframe['our'] = (
-                            (dataframe['rsi'] >= 20) &
-                            (dataframe['rsi'] <= 70) &
-                            (dataframe['is_downtrend'] == 0) &
-                            (~dataframe['rapid_fall']) &
-                            (dataframe['close'] > dataframe['close'].shift(1) * 1.005)).astype(int)
+        # Detekce sestupného trendu
+        dataframe['is_downtrend'] = (dataframe.shift(-12)['close'] < dataframe['open'])
+        dataframe.loc[(dataframe['is_downtrend'] == False) & (dataframe['bullish_divergence'] > 0), 'our'] = 1
+        dataframe['buy'] = 1
+        dataframe['buy_tag'] = ''
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # current_pair = metadata['pair']
-        # open_trades = Trade.get_open_trades()
-        # if any(trade.pair == current_pair for trade in open_trades):
-        #     return dataframe
-        # Podmínka pro nákup
-        cond = (dataframe['our'] == 1)
-        dataframe.loc[cond, 'buy'] = 1
-        dataframe.loc[cond, 'buy_tag'] += 'our_signal_'
+        current_pair = metadata['pair']
+        open_trades = Trade.get_open_trades()
+        if any(trade.pair == current_pair for trade in open_trades):
+            return dataframe
+
+        dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
+        dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
+        dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
+        dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
+        dataframe.loc[(dataframe['our'] > 0), 'buy_tag'] += 'our_signal_'
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -861,7 +855,7 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
 
     def custom_stop_loss(self, pair, bought_price, current_price, current_time):
         roi = (current_price / bought_price) - 1
-        return current_price if roi <= -0.05 else bought_price
+        return current_price if roi <= -0.035 else bought_price
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
@@ -869,6 +863,6 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         dataframe_tuple = self.dp.get_analyzed_dataframe(pair=trade.pair, timeframe=self.timeframe)
         dataframe = dataframe_tuple[0]
         last_candle = dataframe.iloc[-1]
-        if last_candle['is_downtrend'] | last_candle['rapid_fall']:
+        if last_candle['is_downtrend']:
             return None
         return super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake, max_stake)
