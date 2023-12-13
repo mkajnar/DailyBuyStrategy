@@ -830,9 +830,9 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         # Detekce sestupného trendu
-        dataframe['is_downtrend'] = (dataframe.shift(-12)['close'] < dataframe['open'])
+        dataframe['is_downtrend'] = (dataframe.shift(12)['open'] > dataframe['open'])
         dataframe.loc[(dataframe['is_downtrend'] == False) & (dataframe['bullish_divergence'] > 0), 'our'] = 1
-        dataframe['buy'] = 1
+        dataframe['buy'] = 0
         dataframe['buy_tag'] = ''
         return dataframe
 
@@ -842,7 +842,7 @@ class HPStrategyBlockDowntrend(HPStrategyDCA):
         if any(trade.pair == current_pair for trade in open_trades):
             return dataframe
 
-        dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
+        #dataframe.loc[(dataframe['rsi'] <= 40), 'buy'] = 1
         dataframe.loc[(dataframe['rsi'] > 65), 'buy'] = 0
         dataframe.loc[(dataframe['is_downtrend'] == True), 'buy'] = 0
         dataframe.loc[(dataframe['our'] > 0), 'buy'] = 1
