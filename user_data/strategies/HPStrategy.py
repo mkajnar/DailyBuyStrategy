@@ -15,7 +15,7 @@ from pandas import DataFrame
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from freqtrade.constants import Config
-from freqtrade.persistence import Trade
+from freqtrade.persistence import Trade, Order
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
@@ -523,10 +523,27 @@ class HPStrategyDCA(HPStrategy):
     def version(self) -> str:
         return f"{super().version()} DCA "
 
+    def order_price(self, free_amount, positions, dca_buys):
+        total_dca_budget = free_amount - (positions + 1) * dca_buys
+        return total_dca_budget / (positions * dca_buys)
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         return dataframe
+
+    def use_custom_stake_amount(self) -> bool:
+        return True
+
+    def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float, proposed_stake: float,
+                            min_stake: float, max_stake: float, **kwargs) -> float:
+        adjusted_price = self.order_price(free_amount=self.wallets.get_available_stake_amount(),
+                                          positions=3,
+                                          dca_buys=3)
+        logging.info(f"Adjusting entry price to {adjusted_price}")
+        return adjusted_price
+
+
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
         logging.info("Calculating volatility")
@@ -689,6 +706,7 @@ class HPStrategyDCA(HPStrategy):
                             adjusted_stake = stake_amount
                     except:
                         adjusted_stake = stake_amount
+
                     return adjusted_stake
 
                 except Exception as exception:
@@ -756,7 +774,6 @@ class HPStrategyFLRSI(HPStrategyTF):
         dataframe.loc[dataframe['atr'] > 0.002727272727272727, 'buy'] = 0
 
         return dataframe
-
 
 # class HPStrategyBD(HPStrategyDCA):
 #
