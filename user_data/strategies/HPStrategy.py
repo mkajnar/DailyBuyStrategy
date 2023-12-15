@@ -358,12 +358,12 @@ class HPStrategy(IStrategy):
         # Upravte tak, aby se nezahrnovala budoucí data
         dataframe['fractal_top'] = (dataframe['high'] > dataframe['high'].shift(2)) & \
                                    (dataframe['high'] > dataframe['high'].shift(1)) & \
-                                   (dataframe['high'] > dataframe['high'].shift(-1).shift(1)) & \
-                                   (dataframe['high'] > dataframe['high'].shift(-2).shift(1))
+                                   (dataframe['high'] > dataframe['high']) & \
+                                   (dataframe['high'] > dataframe['high'].shift(-1))
         dataframe['fractal_bottom'] = (dataframe['low'] < dataframe['low'].shift(2)) & \
                                       (dataframe['low'] < dataframe['low'].shift(1)) & \
-                                      (dataframe['low'] < dataframe['low'].shift(-1).shift(1)) & \
-                                      (dataframe['low'] < dataframe['low'].shift(-2).shift(1))
+                                      (dataframe['low'] < dataframe['low']) & \
+                                      (dataframe['low'] < dataframe['low'].shift(-1))
 
         dataframe['turnaround_signal'] = (bullish_div) & (dataframe['fractal_bottom'])
         dataframe['rolling_max'] = dataframe['high'].cummax()
