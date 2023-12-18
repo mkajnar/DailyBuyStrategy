@@ -638,7 +638,7 @@ class HPStrategyDCA(HPStrategy):
         dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
         dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
         median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
-        x = int(round(median_drop * 0.9))
+        x = int(round(median_drop * 0.2))
         if x <= 0:
             x = 2
         return x
@@ -654,7 +654,7 @@ class HPStrategyDCA(HPStrategy):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        average = self.calculate_median_drop(dataframe=df, num_candles=30)
+        average = self.calculate_median_drop(dataframe=df, num_candles=20)
         volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
