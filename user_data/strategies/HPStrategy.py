@@ -410,6 +410,7 @@ class HPStrategy(IStrategy):
 
         conditions = []
         dataframe.loc[:, 'buy_tag'] = ''
+        dataframe.loc[:, 'sell_tag'] = ''
 
         lambo2 = (
             # bool(self.lambo2_enabled.value) &
@@ -460,8 +461,6 @@ class HPStrategy(IStrategy):
                 reduce(lambda x, y: x | y, conditions) & better_pair,
                 'buy'
             ] = 1
-
-
 
         dont_buy_conditions = [
             dataframe['pnd_volume_warn'] < 0.0,
@@ -532,6 +531,7 @@ class HPStrategyDCA(HPStrategy):
     safety_order_step_scale = 1.2
     safety_order_volume_scale = 1.4
     drawdown_limit = -3
+    average_dropdown = {}
     buy_params = {
         "dca_min_rsi": 35,
     }
@@ -549,7 +549,6 @@ class HPStrategyDCA(HPStrategy):
     buy_params.update(HPStrategy.buy_params)
     dca_min_rsi = IntParameter(35, 75, default=buy_params['dca_min_rsi'], space='buy', optimize=True)
 
-
     def version(self) -> str:
         return f"{super().version()} DCA "
 
@@ -557,7 +556,6 @@ class HPStrategyDCA(HPStrategy):
         dataframe = super().populate_indicators(dataframe, metadata)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         return dataframe
-
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
         logging.info("Calculating volatility")
@@ -580,15 +578,12 @@ class HPStrategyDCA(HPStrategy):
         return dataframe['pct_change'].tail(periods).abs().mean() * 100
 
     def dynamic_stake_adjustment(self, stake, volatility):
-        logging.info("Adjusting stake dynamically")
         return stake * 0.8 if volatility > 0.05 else stake
 
     def calculate_drawdown(self, current_price, last_order_price):
-        logging.info("Calculating drawdown")
         return (current_price - last_order_price) / last_order_price * 100
 
     def calculate_dca_amount(self, current_price, target_profit, average_buy_price, total_investment):
-        logging.info("Calculating DCA amount")
         target_sell_price = average_buy_price * (1 + target_profit)
         required_price_rise = target_sell_price / current_price
         return total_investment * (required_price_rise - 1)
@@ -597,7 +592,6 @@ class HPStrategyDCA(HPStrategy):
                              low_offset,
                              ewo_high, rsi_buy, base_nb_candles_sell, high_offset, ewo_low, buy_ema_cofi, buy_fastk,
                              buy_fastd, buy_adx, buy_ewo_high, last_candle, previous_candle):
-        logging.info("Checking buy conditions")
         lambo2 = (
                 (last_candle['close'] < (last_candle['ema_14'] * lambo2_ema_14_factor.value)) &
                 (last_candle['rsi_4'] < int(lambo2_rsi_4_limit.value)) &
@@ -638,10 +632,20 @@ class HPStrategyDCA(HPStrategy):
         conditions.append(is_cofi)
         return any(conditions)
 
+    def calculate_median_drop(self, dataframe, num_candles):
+        if len(dataframe) < num_candles:
+            return None
+        dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
+        dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
+        median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
+        x = int(round(median_drop * 0.9))
+        if x <= 0:
+            x = 2
+        return x
+
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
-        logging.info("Adjusting trade position")
 
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
@@ -650,6 +654,7 @@ class HPStrategyDCA(HPStrategy):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
+        average = self.calculate_median_drop(dataframe=df, num_candles=30)
         volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
@@ -712,7 +717,7 @@ class HPStrategyDCA(HPStrategy):
 
             drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
 
-            if drawdown <= self.drawdown_limit:
+            if drawdown <= -average:
                 try:
                     stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
                     stake_amount = min(stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1)),
@@ -766,36 +771,3 @@ class HPStrategyTF(HPStrategyDCA):
         )
         dataframe.loc[down_trend, 'buy'] = 1
         return dataframe
-
-
-class HPStrategyFLRSI(HPStrategyTF):
-
-    def version(self) -> str:
-        return f"{super().version()} FLRSI "
-
-    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
-                        current_profit: float, **kwargs) -> float:
-        return -0.025
-
-    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe = super().populate_buy_trend(dataframe, metadata)
-
-        adjusted_rsi_slow = dataframe['rsi_slow'] * 0.9
-        adjusted_rsi = dataframe['rsi'] * 1.15
-        rsi_crossover = (
-            (qtpylib.crossed_above(adjusted_rsi, adjusted_rsi_slow))
-        )
-        dataframe.loc[rsi_crossover, 'buy_tag'] += 'rsi_crossover_'
-        dataframe.loc[rsi_crossover, 'buy'] = 1
-        dataframe.loc[
-            (
-                    (dataframe['macd_adjusted'] <= dataframe[
-                        'macdsignal_adjusted']) |  # Upřednostnění křížení směrem dolů s větší citlivostí po pádu
-                    (dataframe['macd'] <= 0)  # MACD je pod 0
-            ),
-            'buy'] = 0  # Zrušení nákupního signálu
-
-        dataframe.loc[dataframe['atr'] > 0.002727272727272727, 'buy'] = 0
-
-        return dataframe
-
