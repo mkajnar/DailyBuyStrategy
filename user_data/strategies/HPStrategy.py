@@ -399,6 +399,7 @@ class HPStrategy(IStrategy):
         dataframe['macd_adjusted'] = dataframe['macd'] * (1 - dataframe['volatility_factor'])
         dataframe['macdsignal_adjusted'] = dataframe['macdsignal'] * (1 + dataframe['volatility_factor'])
 
+        dataframe = self.percentage_drop_indicator(dataframe, 9, threshold=0.21)
         # dataframe.drop_duplicates()
         return dataframe
 
@@ -460,9 +461,11 @@ class HPStrategy(IStrategy):
                 'buy'
             ] = 1
 
+
+
         dont_buy_conditions = [
             dataframe['pnd_volume_warn'] < 0.0,
-            dataframe['btc_rsi_8_1h'] < 35.0,
+            dataframe['btc_rsi_8_1h'] < 35.0
         ]
 
         if conditions:
@@ -514,18 +517,38 @@ class HPStrategy(IStrategy):
                 or 'force' in sell_reason
         )
 
+    def percentage_drop_indicator(self, dataframe, period, threshold=0.3):
+        # Vypočet nejvyšší ceny za poslední období
+        highest_high = dataframe['high'].rolling(period).max()
+        # Vypočet procentuálního poklesu pod nejvyšší cenou
+        percentage_drop = (highest_high - dataframe['close']) / highest_high * 100
+        dataframe.loc[percentage_drop < threshold, 'percentage_drop_buy'] = 1
+        dataframe.loc[percentage_drop > threshold, 'percentage_drop_buy'] = 0
+        return dataframe
+
 
 class HPStrategyDCA(HPStrategy):
     initial_safety_order_trigger = -0.018
     safety_order_step_scale = 1.2
     safety_order_volume_scale = 1.4
-    drawdown_limit = -2
+    drawdown_limit = -3
     buy_params = {
         "dca_min_rsi": 35,
     }
 
+    timeframes_in_minutes = {
+        '1m': 1,
+        '5m': 5,
+        '15m': 15,
+        '30m': 30,
+        '1h': 60,
+        '4h': 240,
+        '1d': 1440
+    }
+
     buy_params.update(HPStrategy.buy_params)
     dca_min_rsi = IntParameter(35, 75, default=buy_params['dca_min_rsi'], space='buy', optimize=True)
+
 
     def version(self) -> str:
         return f"{super().version()} DCA "
@@ -634,6 +657,16 @@ class HPStrategyDCA(HPStrategy):
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
         if last_candle['close'] < previous_candle['close']:
+            return None
+
+        # Přidáme kontrolu na základě percentage_drop
+        highest_high = df['high'].rolling(9).max()
+        percentage_drop = (highest_high - df['close']) / highest_high * 100
+
+        dt = percentage_drop.tail(30)
+        if dt.is_monotonic_increasing:
+            logging.info(
+                f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
             return None
 
         current_candle_index = df.index[-1]
@@ -766,178 +799,3 @@ class HPStrategyFLRSI(HPStrategyTF):
 
         return dataframe
 
-# class HPStrategyBD(HPStrategyDCA):
-#
-#     def version(self) -> str:
-#         return f"{super().version()} BD "
-#
-#     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-#         logging.info("Populating indicators")
-#         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
-#         dataframe['rsi_fast'] = ta.RSI(dataframe, timeperiod=4)
-#         dataframe['rsi_slow'] = ta.RSI(dataframe, timeperiod=20)
-#         dataframe['adx'] = ta.ADX(dataframe)
-#         dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
-#         dataframe['ema_14'] = ta.EMA(dataframe, timeperiod=14)
-#         dataframe['rsi_4'] = ta.RSI(dataframe, timeperiod=4)
-#         dataframe['rsi_14'] = ta.RSI(dataframe, timeperiod=14)
-#         stoch_fast = ta.STOCHF(dataframe, 5, 3, 0, 3, 0)
-#         dataframe['fastd'] = stoch_fast['fastd']
-#         dataframe['fastk'] = stoch_fast['fastk']
-#
-#         dataframe['EWO'] = EWO(dataframe, self.fast_ewo, self.slow_ewo)
-#         low_min = dataframe['low'].rolling(window=14, center=True).apply(lambda x: np.argmin(x) == 7, raw=True)
-#         rsi_min = dataframe['rsi'].rolling(window=14, center=True).apply(lambda x: np.argmin(x) == 7, raw=True)
-#         bullish_div = (low_min.notna()) & (rsi_min.shift() > rsi_min)
-#         dataframe['bullish_divergence'] = bullish_div.astype(int)
-#         if self.config['stake_currency'] in ['USDT', 'BUSD']:
-#             btc_info_pair = f"BTC/{self.config['stake_currency']}"
-#         else:
-#             btc_info_pair = "BTC/USDT"
-#         btc_info_tf = self.dp.get_pair_dataframe(btc_info_pair, self.inf_1h)
-#         btc_info_tf = self.info_tf_btc_indicators(btc_info_tf, metadata)
-#         dataframe = merge_informative_pair(dataframe, btc_info_tf, self.timeframe, self.inf_1h, ffill=True)
-#         drop_columns = [f"{s}_{self.inf_1h}" for s in ['date', 'open', 'high', 'low', 'close', 'volume']]
-#         dataframe.drop(columns=dataframe.columns.intersection(drop_columns), inplace=True)
-#         btc_base_tf = self.dp.get_pair_dataframe(btc_info_pair, self.timeframe)
-#         btc_base_tf = self.base_tf_btc_indicators(btc_base_tf, metadata)
-#         dataframe = merge_informative_pair(dataframe, btc_base_tf, self.timeframe, self.timeframe, ffill=True)
-#         drop_columns = [f"{s}_{self.timeframe}" for s in ['date', 'open', 'high', 'low', 'close', 'volume']]
-#         dataframe.drop(columns=dataframe.columns.intersection(drop_columns), inplace=True)
-#
-#         for val in self.base_nb_candles_buy.range:
-#             dataframe[f'ma_buy_{val}'] = ta.EMA(dataframe, timeperiod=val)
-#         for val in self.base_nb_candles_sell.range:
-#             dataframe[f'ma_sell_{val}'] = ta.EMA(dataframe, timeperiod=val)
-#
-#         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
-#         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
-#         dataframe = self.pump_dump_protection(dataframe, metadata)
-#         return dataframe
-#
-#     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-#         dataframe = super().populate_buy_trend(dataframe, metadata)
-#         dataframe.loc[:, 'buy'] = 0
-#         bd = (
-#             (dataframe['bullish_divergence'] > 0)
-#         )
-#         dataframe.loc[bd, 'buy_tag'] += 'bullish_divergence_'
-#         dataframe.loc[bd, 'buy'] = 1
-#         return dataframe
-#
-#     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-#         if conditions := [
-#             (dataframe['close'] > dataframe['hma_50'])
-#             & (
-#                     dataframe['close']
-#                     > (
-#                             dataframe[f'ma_sell_{self.base_nb_candles_sell.value}']
-#                             * self.high_offset_2.value
-#                     )
-#             )
-#             & (dataframe['rsi'] > 50)
-#             & (dataframe['volume'] > 0)
-#             & (dataframe['rsi_fast'] > dataframe['rsi_slow'])
-#             | (dataframe['close'] < dataframe['hma_50'])
-#             & (
-#                     dataframe['close']
-#                     > (
-#                             dataframe[f'ma_sell_{self.base_nb_candles_sell.value}']
-#                             * self.high_offset.value
-#                     )
-#             )
-#             & (dataframe['volume'] > 0)
-#             & (dataframe['rsi_fast'] > dataframe['rsi_slow'])
-#         ]:
-#             dataframe.loc[
-#                 reduce(lambda x, y: x | y, conditions),
-#                 'sell'
-#             ] = 1
-#         return dataframe
-#
-#     def adjust_trade_position(self, trade: Trade, current_time: datetime,
-#                               current_rate: float, current_profit: float, min_stake: float,
-#                               max_stake: float, **kwargs):
-#
-#         logging.info("Adjusting trade position")
-#
-#         try:
-#             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-#             df = dataframe.copy()
-#         except Exception as e:
-#             logging.error(f"Error getting analyzed dataframe: {e}")
-#             return None
-#
-#         volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
-#         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
-#         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
-#
-#         last_candle = df.iloc[-1].squeeze()
-#         previous_candle = df.iloc[-2].squeeze()
-#         if last_candle['close'] < previous_candle['close']:
-#             return None
-#
-#         current_candle_index = df.index[-1]
-#
-#         if last_buy_order := next(
-#                 (
-#                         order
-#                         for order in sorted(
-#                     trade.orders, key=lambda x: x.order_date, reverse=True
-#                 )
-#                         if order.ft_order_side == 'buy' and order.status == 'closed'
-#                 ),
-#                 None,
-#         ):
-#             last_buy_candle = dataframe.loc[dataframe['date'] == last_buy_order.order_date]
-#             if not last_buy_candle.empty:
-#                 last_buy_candle_index = last_buy_candle.index[0]
-#                 if current_candle_index == last_buy_candle_index:
-#                     return None
-#
-#         if (last_candle['bullish_divergence'] == 1 or previous_candle['bullish_divergence'] == 1):
-#
-#             count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-#
-#             if self.max_safety_orders >= count_of_buys >= 1:
-#                 last_order_price = trade.open_rate
-#                 if last_buy_order := next(
-#                         (
-#                                 order
-#                                 for order in sorted(
-#                             trade.orders, key=lambda x: x.order_date, reverse=True
-#                         )
-#                                 if order.ft_order_side == 'buy'
-#                         ),
-#                         None,
-#                 ):
-#                     last_order_price = last_buy_order.price or last_buy_order.average
-#
-#                 drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
-#
-#                 if drawdown <= self.drawdown_limit:
-#                     try:
-#                         stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
-#                         stake_amount = min(stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1)),
-#                                            adjusted_max_stake)
-#                         if stake_amount < adjusted_min_stake:
-#                             return None
-#
-#                         try:
-#                             price_change_rate = (last_candle['close'] - previous_candle['close']) / previous_candle['close']
-#                             if price_change_rate < -0.02:
-#                                 adjusted_stake = stake_amount * 1.5
-#                             elif price_change_rate > 0.02:
-#                                 adjusted_stake = stake_amount * 0.75
-#                             else:
-#                                 adjusted_stake = stake_amount
-#                         except:
-#                             adjusted_stake = stake_amount
-#
-#                         return adjusted_stake
-#
-#                     except Exception as exception:
-#                         logging.error(f"Error adjusting trade position: {exception}")
-#                         return None
-#
-#         return None
