@@ -920,7 +920,11 @@ class HPStrategyTFJPA(HPStrategyTF):
                 last_order_price = last_buy_order.price or last_buy_order.average
 
             drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
-            if drawdown <= -average:
+
+            if drawdown >= -average:
+                return None
+
+            if drawdown < -average:
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
                 return stake_amount * self.calculate_dca_price(base_value=stake_amount, decline=drawdown,
                                                                target_percent=1)
