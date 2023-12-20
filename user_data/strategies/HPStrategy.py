@@ -934,7 +934,7 @@ class HPStrategyTFJPA(HPStrategyTF):
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
                 total_stake_amount = self.wallets.get_total_stake_amount()
                 calculated_dca_stake = self.calculate_dca_price(base_value=stake_amount,
-                                                                decline=pct_treshold,
+                                                                decline=current_profit * 100,
                                                                 target_percent=1)
                 if calculated_dca_stake > total_stake_amount:
                     logging.info(f'AP5 {trade.pair}, DCA: {calculated_dca_stake} is more than {stake_amount}')
