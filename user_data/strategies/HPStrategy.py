@@ -888,13 +888,13 @@ class HPStrategyTFJPA(HPStrategyTF):
         # average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
 
         # Přidáme kontrolu na základě percentage_drop
-        # highest_high = df['high'].rolling(9).max()
-        # percentage_drop = (highest_high - df['close']) / highest_high * 100
-        # dt = percentage_drop.tail(30)
-        # if dt.is_monotonic_increasing:
-        #     logging.info(
-        #         f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
-        #     return None
+        highest_high = df['high'].rolling(9).max()
+        percentage_drop = (highest_high - df['close']) / highest_high * 100
+        dt = percentage_drop.tail(30)
+        if dt.is_monotonic_increasing:
+            logging.info(
+                f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
+            return None
 
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
