@@ -847,7 +847,9 @@ class HPStrategyTFJPA(HPStrategyTF):
         return f"{super().version()} JPA "
 
     def calculate_dca_price(self, base_value, decline, target_percent):
-        return (((base_value / 100) * abs(decline)) / target_percent) * 100
+        result = (((base_value / 100) * abs(decline)) / target_percent) * 100
+        result = max(result, 3)
+        return result
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
