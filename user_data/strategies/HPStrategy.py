@@ -296,9 +296,6 @@ class HPStrategy(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # logging.info("Populating indicators")
-        if Trade.session:
-            self.trades = Trade.get_open_trades()
-
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
