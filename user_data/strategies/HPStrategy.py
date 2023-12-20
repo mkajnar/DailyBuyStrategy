@@ -698,14 +698,13 @@ class HPStrategyDCA(HPStrategy):
         conditions.append(is_cofi)
         return any(conditions)
 
-    def calculate_median_drop(self, dataframe, num_candles, pair):
-        if len(dataframe) < num_candles:
-            return None
-        dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
-        dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
-        median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
-        x = int(round(median_drop * 0.2))
-        return x
+    # def calculate_median_drop(self, dataframe, num_candles, pair):
+    #     if len(dataframe) < num_candles:
+    #         return None
+    #     dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
+    #     dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
+    #     median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
+    #     return int(round(median_drop))
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
@@ -718,7 +717,7 @@ class HPStrategyDCA(HPStrategy):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
+        # average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
         volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
@@ -781,7 +780,7 @@ class HPStrategyDCA(HPStrategy):
 
             drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
 
-            if drawdown <= -average:
+            if drawdown <= -3:
                 try:
                     stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
                     stake_amount = min(stake_amount * math.pow(self.safety_order_volume_scale, (count_of_buys - 1)),
@@ -848,7 +847,7 @@ class HPStrategyTFJPA(HPStrategyTF):
         return f"{super().version()} JPA "
 
     def calculate_dca_price(self, base_value, decline, target_percent):
-        return (((base_value / 100) * decline) / target_percent) * 100
+        return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
@@ -869,12 +868,8 @@ class HPStrategyTFJPA(HPStrategyTF):
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
-        try:
-            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-            df = dataframe.copy()
-        except Exception as e:
-            logging.error(f"Error getting analyzed dataframe: {e}")
-            return None
+
+        # logging.info('AP1')
 
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
@@ -883,45 +878,60 @@ class HPStrategyTFJPA(HPStrategyTF):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            df = dataframe.copy()
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        # average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
 
         # Přidáme kontrolu na základě percentage_drop
-        highest_high = df['high'].rolling(9).max()
-        percentage_drop = (highest_high - df['close']) / highest_high * 100
-        dt = percentage_drop.tail(30)
-        if dt.is_monotonic_increasing:
-            logging.info(
-                f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
-            return None
+        # highest_high = df['high'].rolling(9).max()
+        # percentage_drop = (highest_high - df['close']) / highest_high * 100
+        # dt = percentage_drop.tail(30)
+        # if dt.is_monotonic_increasing:
+        #     logging.info(
+        #         f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
+        #     return None
 
         last_candle = df.iloc[-1].squeeze()
         previous_candle = df.iloc[-2].squeeze()
         if last_candle['close'] <= previous_candle['close']:
             return None
 
+        # logging.info('AP2')
+
         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-        if self.max_safety_orders >= count_of_buys >= 1:
+        if self.max_safety_orders > count_of_buys:
+            # logging.info('AP3')
 
-            last_order_price = trade.open_rate
-            if last_buy_order := next(
-                    (
-                            order
-                            for order in sorted(
-                        trade.orders, key=lambda x: x.order_date, reverse=True
-                    )
-                            if order.ft_order_side == 'buy'
-                    ),
-                    None,
-            ):
-                last_order_price = last_buy_order.price or last_buy_order.average
-
-            drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
-
-            if drawdown >= -average:
-                return None
-
-            if drawdown < -average:
+            # last_order_price = trade.open_rate
+            # if last_buy_order := next(
+            #         (
+            #                 order
+            #                 for order in sorted(
+            #             trade.orders, key=lambda x: x.order_date, reverse=True
+            #         )
+            #                 if order.ft_order_side == 'buy'
+            #         ),
+            #         None,
+            # ):
+            #     last_order_price = last_buy_order.price or last_buy_order.average
+            #
+            # drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
+            #
+            # if drawdown >= -3:
+            #     return None
+            #
+            pct = current_profit * 100
+            if pct <= -1:
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
-                return stake_amount * self.calculate_dca_price(base_value=stake_amount, decline=drawdown,
-                                                               target_percent=1)
+                logging.info(f'AP4 {current_profit}')
+                calculated_dca_stake = stake_amount * self.calculate_dca_price(base_value=stake_amount,
+                                                                               decline=current_profit * 100,
+                                                                               target_percent=2)
+                logging.info(f"Calculated {trade.pair} DCA stake: {calculated_dca_stake}")
+                return calculated_dca_stake
         return None
