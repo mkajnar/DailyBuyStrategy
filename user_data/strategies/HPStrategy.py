@@ -857,7 +857,10 @@ class HPStrategyTFJPA(HPStrategyTF):
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
         # dataframe.loc[:, 'buy'] = 0
-        dataframe = super().populate_buy_trend(dataframe, metadata)
+
+        # try it uncomment for more signals
+        # dataframe = super().populate_buy_trend(dataframe, metadata)
+
         dataframe.loc[(dataframe['volume'] > 0) & (
                 dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
@@ -897,10 +900,11 @@ class HPStrategyTFJPA(HPStrategyTF):
 
         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
         if self.max_safety_orders >= count_of_buys:
-            logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
             pct = current_profit * 100
             pct_threshold = 1
             if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
+                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+
                 total_stake_amount = self.wallets.get_total_stake_amount()
                 calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
                                                                 decline=current_profit * 100,
@@ -908,6 +912,7 @@ class HPStrategyTFJPA(HPStrategyTF):
                 if calculated_dca_stake > total_stake_amount:
                     logging.info(f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
                     return None
+
                 logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
                 return calculated_dca_stake
         return None
