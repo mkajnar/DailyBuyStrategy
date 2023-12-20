@@ -705,10 +705,6 @@ class HPStrategyDCA(HPStrategy):
         dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
         median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
         x = int(round(median_drop * 0.2))
-
-        # logging.info(f"Calculated Median drop for {pair} is {median_drop} %")
-        if x <= 0:
-            x = 2
         return x
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
