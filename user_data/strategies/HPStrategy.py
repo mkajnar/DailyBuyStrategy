@@ -928,9 +928,9 @@ class HPStrategyTFJPA(HPStrategyTF):
             #
             pct = current_profit * 100
             pct_treshold = 2
-            if pct <= -pct_treshold:
-                logging.info(f'AP4 {trade.pair}, Profit: {current_profit}')
+            if pct <= -pct_treshold and last_candle['ema_diff_buy_signal'] == 1:
 
+                logging.info(f'AP4 {trade.pair}, Profit: {current_profit}')
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
                 total_stake_amount = self.wallets.get_total_stake_amount()
                 calculated_dca_stake = self.calculate_dca_price(base_value=stake_amount,
