@@ -1,5 +1,5 @@
 {
-    "max_open_trades": 20,
+    "max_open_trades": 50,
     "stake_currency": "USDT",
     "stake_amount": "unlimited",
     "tradable_balance_ratio": 1,
@@ -11,8 +11,8 @@
     "trading_mode": "spot",
     "margin_mode": "",
     "unfilledtimeout": {
-        "entry": 10,
-        "exit": 10,
+        "entry": 30,
+        "exit": 30,
         "exit_timeout_count": 0,
         "unit": "minutes"
     },
@@ -50,60 +50,24 @@
             "enableRateLimit": true,
             "timeout": 60000
         },
-        "pair_whitelist":
-           [
-             "ETH/USDT", "BTC/USDT", "SOL/USDT", "ADA/USDT", "AVAX/USDT", "XRP/USDT", "DOGE/USDT", "LINK/USDT", "FTM/USDT", "MATIC/USDT", "DOT/USDT", "ALGO/USDT", "INJ/USDT", "BNB/USDT", "ATOM/USDT", "ICP/USDT", "VRA/USDT", "SHIB/USDT", "FLR/USDT", "KAS/USDT", "LTC/USDT", "IMX/USDT", "ARB/USDT", "PYTH/USDT", "XMR/USDT", "RUNE/USDT", "HBAR/USDT", "AGIX/USDT", "NEAR/USDT", "FET/USDT", "DYDX/USDT", "TOMI/USDT", "RNDR/USDT", "SUI/USDT", "GALAX/USDT", "EGLD/USDT", "FTT/USDT", "FIL/USDT", "XLM/USDT", "PYR/USDT", "UNI/USDT", "NAKA/USDT", "TRX/USDT", "QNT/USDT", "AAVE/USDT", "CRO/USDT", "APE/USDT", "APT/USDT", "BCH/USDT", "BLUR/USDT"
-           ]
-        ,
-        "pair_blacklist": [".*3L.*",".*3S.*"]
+        "pair_whitelist": ["BTC/USDT"],
+        "pair_blacklist": []
     },
-    "_pairlists":
-    [
-  {
-    "method": "VolumePairList",
-    "number_assets": 300,
-    "sort_key": "quoteVolume",
-    "min_value": 5000,
-    "refresh_period": 3600,
-    "lookback_timeframe": "1m"
-  },
-  {
-    "method": "PerformanceFilter",
-    "minutes": 5,
-    "min_profit": 1
-  },
-  {
-    "method": "SpreadFilter",
-    "max_spread_ratio": 0.005
-  },
-  {
-    "method": "VolatilityFilter",
-    "lookback_days": 10,
-    "min_volatility": 0.01,
-    "max_volatility": 0.2,
-    "refresh_period": 1800
-  },
-  {
-    "method": "VolumePairList",
-    "number_assets": 50,
-    "sort_key": "quoteVolume",
-    "refresh_period": 1800
-  }
-],
     "pairlists": [
         {
-            "method": "StaticPairList",
+            "method": "VolumePairList",
             "number_assets": 50,
             "sort_key": "quoteVolume",
-            "min_value": 0,
-            "refresh_period": 1800
-        }
+            "min_value": 500000,
+            "refresh_period": 1800,
+            "lookback_timeframe": "1m"
+          },
+          {
+            "method": "PriceFilter",
+            "max_price": 5,
+            "min_price": 0.05
+          }
     ],
-    "telegram": {
-        "enabled": false,
-        "token": "",
-        "chat_id": ""
-    },
     "api_server": {
         "enabled": true,
         "listen_ip_address": "0.0.0.0",
@@ -114,9 +78,9 @@
         "ws_token": "P3RWZvSHaCxv39j_bj7WF2OU1BJmzRujIA",
         "CORS_origins": [],
         "username": "freqtrade",
-        "password": "Cac987321Deal."
+        "password": "freqtrade"
     },
-    "bot_name": "freqtrade",
+    "bot_name": "freqtrade_1",
     "initial_state": "running",
     "force_entry_enable": true,
     "internals": {
