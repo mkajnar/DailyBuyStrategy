@@ -848,7 +848,6 @@ class HPStrategyTFJPA(HPStrategyTF):
 
     def calculate_dca_price(self, base_value, decline, target_percent):
         result = (((base_value / 100) * abs(decline)) / target_percent) * 100
-        result = max(result, 3)
         return result
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -929,11 +928,14 @@ class HPStrategyTFJPA(HPStrategyTF):
             #
             pct = current_profit * 100
             if pct <= -1:
+                logging.info(f'AP4 {trade.pair}, Profit: {current_profit}')
+
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
-                logging.info(f'AP4 {current_profit}')
-                calculated_dca_stake = stake_amount * self.calculate_dca_price(base_value=stake_amount,
-                                                                               decline=current_profit * 100,
-                                                                               target_percent=2)
-                logging.info(f"Calculated {trade.pair} DCA stake: {calculated_dca_stake}")
+                calculated_dca_stake = self.calculate_dca_price(base_value=stake_amount,
+                                                                decline=current_profit * 100,
+                                                                target_percent=2)
+                if calculated_dca_stake > stake_amount:
+                    return None
+                logging.info(f'AP5 {trade.pair}, DCA: {calculated_dca_stake}')
                 return calculated_dca_stake
         return None
