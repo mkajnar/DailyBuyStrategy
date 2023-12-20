@@ -7,7 +7,7 @@ import traceback
 from datetime import datetime
 from datetime import timedelta, timezone
 from functools import reduce
-from typing import Optional
+from typing import Optional, List
 import numpy as np
 import pandas as pd
 import talib.abstract as ta
@@ -59,6 +59,7 @@ class HPStrategy(IStrategy):
     locked = []
     stoploss = -0.99
 
+    trades: List['LocalTrade'] = []
     out_open_trades_limit = 4
     is_optimize_cofi = False
     use_sell_signal = True
@@ -295,6 +296,9 @@ class HPStrategy(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # logging.info("Populating indicators")
+        if Trade.session:
+            self.trades = Trade.get_open_trades()
+
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -573,11 +577,12 @@ class HPStrategy(IStrategy):
         Returns:
             bool: True if the exit is confirmed, False otherwise.
         """
+        self.trades = Trade.get_open_trades()
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
         return (
-                current_profit >= 0.01  # nechceme jít do ztráty
+                current_profit >= 0.002  # nechceme jít do ztráty
                 or 'unclog' in sell_reason
                 or 'force' in sell_reason
         )
@@ -847,12 +852,12 @@ class HPStrategyTFJPA(HPStrategyTF):
         return f"{super().version()} JPA "
 
     def calculate_dca_price(self, base_value, decline, target_percent):
-        result = (((base_value / 100) * abs(decline)) / target_percent) * 100
-        return result
+        return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
-        dataframe.loc[:, 'buy'] = 0
+        # dataframe.loc[:, 'buy'] = 0
+        dataframe = super().populate_buy_trend(dataframe, metadata)
         dataframe.loc[(dataframe['volume'] > 0) & (
                 dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
@@ -860,7 +865,8 @@ class HPStrategyTFJPA(HPStrategyTF):
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'sell_tag'] = ''
-        dataframe.loc[:, 'sell'] = 0
+        # dataframe.loc[:, 'sell'] = 0
+        dataframe = super().populate_sell_trend(dataframe, metadata)
         dataframe.loc[(dataframe['volume'] > 0) & (
                 dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell_tag'] += 'ema_diff_sell_signal'
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell'] = 1
@@ -869,9 +875,6 @@ class HPStrategyTFJPA(HPStrategyTF):
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
-
-        # logging.info('AP1')
-
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
             df = dataframe.copy()
@@ -879,16 +882,6 @@ class HPStrategyTFJPA(HPStrategyTF):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        try:
-            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-            df = dataframe.copy()
-        except Exception as e:
-            logging.error(f"Error getting analyzed dataframe: {e}")
-            return None
-
-        # average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
-
-        # Přidáme kontrolu na základě percentage_drop
         highest_high = df['high'].rolling(9).max()
         percentage_drop = (highest_high - df['close']) / highest_high * 100
         dt = percentage_drop.tail(30)
@@ -902,43 +895,19 @@ class HPStrategyTFJPA(HPStrategyTF):
         if last_candle['close'] <= previous_candle['close']:
             return None
 
-        # logging.info('AP2')
-
         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-        if self.max_safety_orders > count_of_buys:
-            # logging.info('AP3')
-
-            # last_order_price = trade.open_rate
-            # if last_buy_order := next(
-            #         (
-            #                 order
-            #                 for order in sorted(
-            #             trade.orders, key=lambda x: x.order_date, reverse=True
-            #         )
-            #                 if order.ft_order_side == 'buy'
-            #         ),
-            #         None,
-            # ):
-            #     last_order_price = last_buy_order.price or last_buy_order.average
-            #
-            # drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
-            #
-            # if drawdown >= -3:
-            #     return None
-            #
+        if self.max_safety_orders >= count_of_buys:
+            logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
             pct = current_profit * 100
-            pct_treshold = 2
-            if pct <= -pct_treshold and last_candle['ema_diff_buy_signal'] == 1:
-
-                logging.info(f'AP4 {trade.pair}, Profit: {current_profit}')
-                stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
+            pct_threshold = 1
+            if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
                 total_stake_amount = self.wallets.get_total_stake_amount()
-                calculated_dca_stake = self.calculate_dca_price(base_value=stake_amount,
+                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
                                                                 decline=current_profit * 100,
-                                                                target_percent=1)
+                                                                target_percent=0.7)
                 if calculated_dca_stake > total_stake_amount:
-                    logging.info(f'AP5 {trade.pair}, DCA: {calculated_dca_stake} is more than {stake_amount}')
+                    logging.info(f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
                     return None
-                logging.info(f'AP6 {trade.pair}, DCA: {calculated_dca_stake}')
+                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
                 return calculated_dca_stake
         return None
