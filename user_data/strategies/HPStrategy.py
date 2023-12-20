@@ -927,15 +927,18 @@ class HPStrategyTFJPA(HPStrategyTF):
             #     return None
             #
             pct = current_profit * 100
-            if pct <= -1:
+            pct_treshold = 2
+            if pct <= -pct_treshold:
                 logging.info(f'AP4 {trade.pair}, Profit: {current_profit}')
 
                 stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
+                total_stake_amount = self.wallets.get_total_stake_amount()
                 calculated_dca_stake = self.calculate_dca_price(base_value=stake_amount,
-                                                                decline=current_profit * 100,
-                                                                target_percent=2)
-                if calculated_dca_stake > stake_amount:
+                                                                decline=pct_treshold * 100,
+                                                                target_percent=1)
+                if calculated_dca_stake > total_stake_amount:
+                    logging.info(f'AP5 {trade.pair}, DCA: {calculated_dca_stake} is more than {stake_amount}')
                     return None
-                logging.info(f'AP5 {trade.pair}, DCA: {calculated_dca_stake}')
+                logging.info(f'AP6 {trade.pair}, DCA: {calculated_dca_stake}')
                 return calculated_dca_stake
         return None
