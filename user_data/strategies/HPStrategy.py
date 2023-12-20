@@ -15,7 +15,7 @@ from pandas import DataFrame
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from freqtrade.constants import Config
-from freqtrade.persistence import Trade, Order
+from freqtrade.persistence import Trade, Order, LocalTrade
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
@@ -51,7 +51,7 @@ def EWO(dataframe, ema_length=5, ema2_length=3):
 class HPStrategy(IStrategy):
     INTERFACE_VERSION = 2
 
-    max_safety_orders = 3
+    max_safety_orders = 2
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
@@ -59,10 +59,11 @@ class HPStrategy(IStrategy):
     locked = []
     stoploss = -0.99
 
+    out_open_trades_limit = 4
     is_optimize_cofi = False
     use_sell_signal = True
     sell_profit_only = True
-    sell_profit_offset = 0.005
+    # sell_profit_offset = 0.015
     ignore_roi_if_buy_signal = False
     position_adjustment_enable = True
     order_time_in_force = {
@@ -197,19 +198,19 @@ class HPStrategy(IStrategy):
         total_dca_budget = free_amount - (positions + 1) * dca_buys
         return total_dca_budget / (positions * dca_buys)
 
-    def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
-                            proposed_stake: float, min_stake: Optional[float], max_stake: float,
-                            leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
-        min_trade_size = 3
-        if proposed_stake < min_trade_size:
-            return 0
-        adjusted_price = self.order_price(free_amount=self.wallets.get_available_stake_amount(),
-                                          positions=3,
-                                          dca_buys=self.max_safety_orders)
-        if adjusted_price < min_trade_size:
-            return 0
-        logging.info(f"Adjusting entry price to {adjusted_price}")
-        return adjusted_price
+    # def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
+    #                         proposed_stake: float, min_stake: Optional[float], max_stake: float,
+    #                         leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
+    #     min_trade_size = 3
+    #     if proposed_stake < min_trade_size:
+    #         return 0
+    #     adjusted_price = self.order_price(free_amount=self.wallets.get_available_stake_amount(),
+    #                                       positions=3,
+    #                                       dca_buys=self.max_safety_orders)
+    #     if adjusted_price < min_trade_size:
+    #         return 0
+    #     logging.info(f"Adjusting entry price to {adjusted_price}")
+    #     return adjusted_price
 
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
@@ -293,7 +294,7 @@ class HPStrategy(IStrategy):
             logging.error(str(ex))
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        logging.info("Populating indicators")
+        # logging.info("Populating indicators")
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -351,6 +352,27 @@ class HPStrategy(IStrategy):
         dataframe['fastk'] = stoch_fast['fastk']
         dataframe['adx'] = ta.ADX(dataframe)
         dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
+
+        condition = dataframe['ema_8'] > dataframe['ema_14']
+        percentage_difference = 100 * (dataframe['ema_8'] - dataframe['ema_14']).abs() / dataframe['ema_14']
+        dataframe['ema_pct_diff'] = percentage_difference.where(condition, -percentage_difference)
+        dataframe['prev_ema_pct_diff'] = dataframe['ema_pct_diff'].shift(1)
+
+        crossover_up = (dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (
+                dataframe['ema_8'] > dataframe['ema_14'])
+
+        close_to_crossover_up = (dataframe['ema_8'] < dataframe['ema_14']) & (
+                dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (
+                                        dataframe['ema_8'] > dataframe['ema_8'].shift(1))
+
+        ema_buy_signal = ((dataframe['ema_pct_diff'] < 0) & (dataframe['prev_ema_pct_diff'] < 0) & (
+                dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
+
+        dataframe['ema_diff_buy_signal'] = ema_buy_signal | crossover_up | close_to_crossover_up
+
+        dataframe['ema_diff_sell_signal'] = ((dataframe['ema_pct_diff'] > 0) &
+                                             (dataframe['prev_ema_pct_diff'] > 0) &
+                                             (dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
 
         dataframe = self.pump_dump_protection(dataframe, metadata)
 
@@ -505,13 +527,57 @@ class HPStrategy(IStrategy):
             ] = 1
         return dataframe
 
+    def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
+                            time_in_force: str, current_time: datetime, entry_tag: Optional[str],
+                            side: str, **kwargs) -> bool:
+        """
+        Confirms the entry of a trade based on the number of open trades.
+        Args:
+            pair: The trading pair.
+            order_type: The type of order.
+            amount: The amount of the trade.
+            rate: The rate of the trade.
+            time_in_force: The time in force of the order.
+            current_time: The current time.
+            entry_tag: The entry tag of the trade.
+            side: The side of the trade.
+            **kwargs: Additional keyword arguments.
+        Returns:
+            bool: True if the entry is confirmed, False otherwise.
+        """
+
+        # logging.info(f"Count opened trades is {Trade.get_open_trade_count()}")
+        result = Trade.get_open_trade_count() < self.out_open_trades_limit
+        # if result:
+        # logging.info(f"Count of opened trades is lower than {self.out_open_trades_limit}, OK")
+        # logging.info(f"Pair {pair} - entry confirm: Amount {amount}, Rate {rate}, Side {side}, Entry tag {entry_tag}")
+        # else:
+        # logging.info(f"Count of opened trades is higher than {self.out_open_trades_limit}, BAD")
+        return result
+
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
+        """
+        Confirms the exit of a trade based on the sell reason and current profit.
+        Args:
+            pair: The trading pair.
+            trade: The trade object.
+            order_type: The type of order.
+            amount: The amount of the trade.
+            rate: The rate of the trade.
+            time_in_force: The time in force of the order.
+            sell_reason: The reason for selling.
+            current_time: The current time.
+            **kwargs: Additional keyword arguments.
+        Returns:
+            bool: True if the exit is confirmed, False otherwise.
+        """
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
+        dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
         return (
-                current_profit >= self.sell_profit_offset
+                current_profit >= 0.01  # nechceme jít do ztráty
                 or 'unclog' in sell_reason
                 or 'force' in sell_reason
         )
@@ -558,7 +624,7 @@ class HPStrategyDCA(HPStrategy):
         return dataframe
 
     def calculate_volatility(self, dataframe: DataFrame, pair: str, timeframe: str) -> float:
-        logging.info("Calculating volatility")
+        # logging.info("Calculating volatility")
         timeframes_in_minutes = {
             '1m': 1,
             '5m': 5,
@@ -632,13 +698,15 @@ class HPStrategyDCA(HPStrategy):
         conditions.append(is_cofi)
         return any(conditions)
 
-    def calculate_median_drop(self, dataframe, num_candles):
+    def calculate_median_drop(self, dataframe, num_candles, pair):
         if len(dataframe) < num_candles:
             return None
         dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
         dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
         median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
         x = int(round(median_drop * 0.2))
+
+        # logging.info(f"Calculated Median drop for {pair} is {median_drop} %")
         if x <= 0:
             x = 2
         return x
@@ -654,7 +722,7 @@ class HPStrategyDCA(HPStrategy):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        average = self.calculate_median_drop(dataframe=df, num_candles=20)
+        average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
         volatility = self.calculate_volatility(df, trade.pair, self.timeframe)
         adjusted_min_stake = self.dynamic_stake_adjustment(min_stake, volatility)
         adjusted_max_stake = self.dynamic_stake_adjustment(max_stake, volatility)
@@ -771,3 +839,89 @@ class HPStrategyTF(HPStrategyDCA):
         )
         dataframe.loc[down_trend, 'buy'] = 1
         return dataframe
+
+
+class HPStrategyTFJPA(HPStrategyTF):
+    trailing_stop = True
+    trailing_only_offset_is_reached = True
+    trailing_stop_positive = 0.007
+    trailing_stop_positive_offset = 0.015
+    ignore_roi_if_buy_signal = True
+
+    def version(self) -> str:
+        return f"{super().version()} JPA "
+
+    def calculate_dca_price(self, base_value, decline, target_percent):
+        return (((base_value / 100) * decline) / target_percent) * 100
+
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[:, 'buy_tag'] = ''
+        dataframe.loc[:, 'buy'] = 0
+        dataframe.loc[(dataframe['volume'] > 0) & (
+                dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
+        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
+        return dataframe
+
+    def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe.loc[:, 'sell_tag'] = ''
+        dataframe.loc[:, 'sell'] = 0
+        dataframe.loc[(dataframe['volume'] > 0) & (
+                dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell_tag'] += 'ema_diff_sell_signal'
+        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell'] = 1
+        return dataframe
+
+    def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                              current_rate: float, current_profit: float, min_stake: float,
+                              max_stake: float, **kwargs):
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            df = dataframe.copy()
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            df = dataframe.copy()
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        average = self.calculate_median_drop(dataframe=df, num_candles=20, pair=trade.pair)
+
+        # Přidáme kontrolu na základě percentage_drop
+        highest_high = df['high'].rolling(9).max()
+        percentage_drop = (highest_high - df['close']) / highest_high * 100
+        dt = percentage_drop.tail(30)
+        if dt.is_monotonic_increasing:
+            logging.info(
+                f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
+            return None
+
+        last_candle = df.iloc[-1].squeeze()
+        previous_candle = df.iloc[-2].squeeze()
+        if last_candle['close'] <= previous_candle['close']:
+            return None
+
+        count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
+        if self.max_safety_orders >= count_of_buys >= 1:
+
+            last_order_price = trade.open_rate
+            if last_buy_order := next(
+                    (
+                            order
+                            for order in sorted(
+                        trade.orders, key=lambda x: x.order_date, reverse=True
+                    )
+                            if order.ft_order_side == 'buy'
+                    ),
+                    None,
+            ):
+                last_order_price = last_buy_order.price or last_buy_order.average
+
+            drawdown = self.calculate_drawdown(current_rate, last_order_price) if last_order_price else 0
+            if drawdown <= -average:
+                stake_amount = self.wallets.get_trade_stake_amount(trade.pair, None)
+                return stake_amount * self.calculate_dca_price(base_value=stake_amount, decline=drawdown,
+                                                               target_percent=1)
+        return None
