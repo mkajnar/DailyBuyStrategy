@@ -18,6 +18,7 @@ from freqtrade.constants import Config
 from freqtrade.persistence import Trade, Order, LocalTrade
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
+from technical.indicators import ichimoku
 
 
 def pct_change(a, b):
@@ -60,7 +61,7 @@ class HPStrategy(IStrategy):
     stoploss = -0.99
 
     trades: List['LocalTrade'] = []
-    out_open_trades_limit = 4
+    out_open_trades_limit = 8
     is_optimize_cofi = False
     use_sell_signal = True
     sell_profit_only = True
@@ -215,7 +216,8 @@ class HPStrategy(IStrategy):
 
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
-        informative_pairs = [(pair, '1h') for pair in pairs]
+        informative_pairs = [(pair, '5m') for pair in pairs]
+        informative_pairs.extend([(pair, '1h') for pair in pairs])
 
         if self.config['stake_currency'] in ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'PAX', 'USD', 'EUR', 'GBP']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
@@ -296,6 +298,7 @@ class HPStrategy(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # logging.info("Populating indicators")
+
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -423,7 +426,17 @@ class HPStrategy(IStrategy):
         dataframe['macdsignal_adjusted'] = dataframe['macdsignal'] * (1 + dataframe['volatility_factor'])
 
         dataframe = self.percentage_drop_indicator(dataframe, 9, threshold=0.21)
-        # dataframe.drop_duplicates()
+
+        ichi = ichimoku(dataframe)
+        dataframe['senkou_span_a'] = ichi['senkou_span_a']
+        dataframe['senkou_span_b'] = ichi['senkou_span_b']
+
+        informative_df_5m = self.dp.get_pair_dataframe(pair=metadata['pair'], timeframe='5m')
+        ichi_5m = ichimoku(informative_df_5m)
+        dataframe[f'open_5m'] = informative_df_5m['open']
+        dataframe[f'senkou_span_a_5m'] = ichi_5m['senkou_span_a']
+        dataframe[f'senkou_span_b_5m'] = ichi_5m['senkou_span_b']
+
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -559,30 +572,24 @@ class HPStrategy(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        """
-        Confirms the exit of a trade based on the sell reason and current profit.
-        Args:
-            pair: The trading pair.
-            trade: The trade object.
-            order_type: The type of order.
-            amount: The amount of the trade.
-            rate: The rate of the trade.
-            time_in_force: The time in force of the order.
-            sell_reason: The reason for selling.
-            current_time: The current time.
-            **kwargs: Additional keyword arguments.
-        Returns:
-            bool: True if the exit is confirmed, False otherwise.
-        """
         self.trades = Trade.get_open_trades()
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-        return (
-                current_profit >= 0.002  # nechceme jít do ztráty
-                or 'unclog' in sell_reason
-                or 'force' in sell_reason
-        )
+        ema_8 = dataframe['ema_8'].iat[-1]
+        ema_14 = dataframe['ema_14'].iat[-1]
+        if 'unclog' in sell_reason or 'force' in sell_reason:
+            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
+            return True
+        elif current_profit >= 0.0025:
+            if ema_8 <= ema_14:
+                logging.info(f"CTE - EMA 8 {ema_8} <= EMA 14 {ema_14}, EXIT")
+                return True
+            else:
+                logging.info(f"CTE - EMA 8 {ema_8} > EMA 14 {ema_14}, HOLD")
+                return False
+        else:
+            return False
 
     def percentage_drop_indicator(self, dataframe, period, threshold=0.3):
         # Vypočet nejvyšší ceny za poslední období
@@ -858,6 +865,11 @@ class HPStrategyTFJPA(HPStrategyTF):
         # try it uncomment for more signals
         # dataframe = super().populate_buy_trend(dataframe, metadata)
 
+        # ichi_cond = ((dataframe['open_5m'] > dataframe[f'senkou_span_a_5m'])
+        #              & (dataframe['open_5m'] > dataframe[f'senkou_span_b_5m']))
+        # dataframe.loc[ichi_cond, 'buy_tag'] += 'ichi_buy_signal'
+        # dataframe.loc[ichi_cond, 'buy'] = 1
+
         dataframe.loc[(dataframe['volume'] > 0) & (
                 dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
@@ -867,6 +879,12 @@ class HPStrategyTFJPA(HPStrategyTF):
         dataframe.loc[:, 'sell_tag'] = ''
         # dataframe.loc[:, 'sell'] = 0
         dataframe = super().populate_sell_trend(dataframe, metadata)
+
+        # ichi_cond = ((dataframe['open_5m'] < dataframe[f'senkou_span_a_5m'])
+        #              & (dataframe['open_5m'] < dataframe[f'senkou_span_b_5m']))
+        # dataframe.loc[ichi_cond, 'sell_tag'] += 'ichi_sell_signal'
+        # dataframe.loc[ichi_cond, 'sell'] = 1
+
         dataframe.loc[(dataframe['volume'] > 0) & (
                 dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell_tag'] += 'ema_diff_sell_signal'
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell'] = 1
