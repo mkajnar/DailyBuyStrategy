@@ -3,22 +3,20 @@ import json
 import logging
 import math
 import os
-import traceback
 from datetime import datetime
 from datetime import timedelta, timezone
 from functools import reduce
 from typing import Optional, List
+
 import numpy as np
-import pandas as pd
 import talib.abstract as ta
 from pandas import DataFrame
+from technical.indicators import ichimoku
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
-from freqtrade.constants import Config
-from freqtrade.persistence import Trade, Order, LocalTrade
+from freqtrade.persistence import Trade, LocalTrade
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
-from technical.indicators import ichimoku
 
 
 def pct_change(a, b):
@@ -52,7 +50,7 @@ def EWO(dataframe, ema_length=5, ema2_length=3):
 class HPStrategy(IStrategy):
     INTERFACE_VERSION = 2
 
-    max_safety_orders = 2
+    max_safety_orders = 3
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
@@ -199,20 +197,6 @@ class HPStrategy(IStrategy):
     def order_price(self, free_amount, positions, dca_buys):
         total_dca_budget = free_amount - (positions + 1) * dca_buys
         return total_dca_budget / (positions * dca_buys)
-
-    # def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
-    #                         proposed_stake: float, min_stake: Optional[float], max_stake: float,
-    #                         leverage: float, entry_tag: Optional[str], side: str, **kwargs) -> float:
-    #     min_trade_size = 3
-    #     if proposed_stake < min_trade_size:
-    #         return 0
-    #     adjusted_price = self.order_price(free_amount=self.wallets.get_available_stake_amount(),
-    #                                       positions=3,
-    #                                       dca_buys=self.max_safety_orders)
-    #     if adjusted_price < min_trade_size:
-    #         return 0
-    #     logging.info(f"Adjusting entry price to {adjusted_price}")
-    #     return adjusted_price
 
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
@@ -544,29 +528,8 @@ class HPStrategy(IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
-        """
-        Confirms the entry of a trade based on the number of open trades.
-        Args:
-            pair: The trading pair.
-            order_type: The type of order.
-            amount: The amount of the trade.
-            rate: The rate of the trade.
-            time_in_force: The time in force of the order.
-            current_time: The current time.
-            entry_tag: The entry tag of the trade.
-            side: The side of the trade.
-            **kwargs: Additional keyword arguments.
-        Returns:
-            bool: True if the entry is confirmed, False otherwise.
-        """
-
         # logging.info(f"Count opened trades is {Trade.get_open_trade_count()}")
         result = Trade.get_open_trade_count() < self.out_open_trades_limit
-        # if result:
-        # logging.info(f"Count of opened trades is lower than {self.out_open_trades_limit}, OK")
-        # logging.info(f"Pair {pair} - entry confirm: Amount {amount}, Rate {rate}, Side {side}, Entry tag {entry_tag}")
-        # else:
-        # logging.info(f"Count of opened trades is higher than {self.out_open_trades_limit}, BAD")
         return result
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -720,14 +683,6 @@ class HPStrategyDCA(HPStrategy):
         )
         conditions.append(is_cofi)
         return any(conditions)
-
-    # def calculate_median_drop(self, dataframe, num_candles, pair):
-    #     if len(dataframe) < num_candles:
-    #         return None
-    #     dataframe['max_price'] = dataframe['high'].rolling(window=num_candles).max()
-    #     dataframe['percent_drop'] = (dataframe['max_price'] - dataframe['close']) / dataframe['max_price'] * 100
-    #     median_drop = dataframe['percent_drop'].rolling(window=num_candles).median().iloc[-1]
-    #     return int(round(median_drop))
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
@@ -914,34 +869,47 @@ class HPStrategyTFJPA(HPStrategyTF):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        highest_high = df['high'].rolling(9).max()
-        percentage_drop = (highest_high - df['close']) / highest_high * 100
-        dt = percentage_drop.tail(30)
-        if dt.is_monotonic_increasing:
-            logging.info(
-                f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
+        # Výpočet rozdílů EMA
+        ema_8 = df['ema_8']
+        ema_14 = df['ema_14']
+        ema_diff = abs(ema_8 - ema_14)
+
+        # Kontrola zmenšování rozdílu EMA v posledních dvou svíčkách
+        if (ema_8.iat[-1] < ema_14.iat[-1]
+                and ema_diff.iat[-1] < ema_diff.iat[-2] < ema_diff.iat[-3]):
+            logging.info(f"DCA conditions met for {trade.pair}, proceeding with DCA purchase.")
+            highest_high = df['high'].rolling(9).max()
+            percentage_drop = (highest_high - df['close']) / highest_high * 100
+            dt = percentage_drop.tail(10)
+            if dt.is_monotonic_increasing:
+                logging.info(
+                    f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
+                return None
+
+            last_candle = df.iloc[-1].squeeze()
+            previous_candle = df.iloc[-2].squeeze()
+            if last_candle['close'] <= previous_candle['close']:
+                return None
+
+            count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
+            if self.max_safety_orders >= count_of_buys:
+                pct = current_profit * 100
+                pct_threshold = 1
+                if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
+                    logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+
+                    total_stake_amount = self.wallets.get_total_stake_amount()
+                    calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                    decline=current_profit * 100,
+                                                                    target_percent=0.7)
+                    if calculated_dca_stake > total_stake_amount:
+                        logging.info(f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
+                        return None
+
+                    logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                    return calculated_dca_stake
+        else:
+            logging.info(f"DCA conditions not met for {trade.pair}, skipping DCA purchase.")
             return None
 
-        last_candle = df.iloc[-1].squeeze()
-        previous_candle = df.iloc[-2].squeeze()
-        if last_candle['close'] <= previous_candle['close']:
-            return None
-
-        count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-        if self.max_safety_orders >= count_of_buys:
-            pct = current_profit * 100
-            pct_threshold = 1
-            if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
-                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
-
-                total_stake_amount = self.wallets.get_total_stake_amount()
-                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                decline=current_profit * 100,
-                                                                target_percent=0.7)
-                if calculated_dca_stake > total_stake_amount:
-                    logging.info(f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
-                    return None
-
-                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-                return calculated_dca_stake
         return None
