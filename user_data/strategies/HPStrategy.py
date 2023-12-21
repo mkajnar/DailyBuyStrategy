@@ -576,18 +576,32 @@ class HPStrategy(IStrategy):
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-        ema_8 = dataframe['ema_8'].iat[-1]
-        ema_14 = dataframe['ema_14'].iat[-1]
+
+        # Aktuální hodnoty EMA
+        ema_8_current = dataframe['ema_8'].iat[-1]
+        ema_14_current = dataframe['ema_14'].iat[-1]
+
+        # Hodnoty EMA předchozí svíčky
+        ema_8_previous = dataframe['ema_8'].iat[-2]
+        ema_14_previous = dataframe['ema_14'].iat[-2]
+
+        # Výpočet rozdílu EMA mezi aktuální a předchozí svíčkou
+        diff_current = abs(ema_8_current - ema_14_current)
+        diff_previous = abs(ema_8_previous - ema_14_previous)
+
         if 'unclog' in sell_reason or 'force' in sell_reason:
             logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
         elif current_profit >= 0.0025:
-            if ema_8 <= ema_14:
-                logging.info(f"CTE - EMA 8 {ema_8} <= EMA 14 {ema_14}, EXIT")
+            if ema_8_current <= ema_14_current:
+                logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current}, EXIT")
                 return True
-            else:
-                logging.info(f"CTE - EMA 8 {ema_8} > EMA 14 {ema_14}, HOLD")
+            elif ema_8_current > ema_14_current and diff_current > diff_previous:
+                logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
                 return False
+            else:
+                logging.info(f"CTE - Conditions not met, EXIT")
+                return True
         else:
             return False
 
