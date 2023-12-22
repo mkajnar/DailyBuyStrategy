@@ -553,7 +553,7 @@ class HPStrategy(IStrategy):
             logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
         elif current_profit >= 0.0025:
-            if ema_8_current <= ema_14_current and diff_change_pct >= 0.05:
+            if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
                 logging.info(
                     f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
                 return True
