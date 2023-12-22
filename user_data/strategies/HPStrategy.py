@@ -58,8 +58,7 @@ class HPStrategy(IStrategy):
     locked = []
     stoploss = -0.99
 
-    trades: List['LocalTrade'] = []
-    out_open_trades_limit = 8
+    out_open_trades_limit = 5
     is_optimize_cofi = False
     use_sell_signal = True
     sell_profit_only = True
@@ -200,8 +199,7 @@ class HPStrategy(IStrategy):
 
     def informative_pairs(self):
         pairs = self.dp.current_whitelist()
-        informative_pairs = [(pair, '5m') for pair in pairs]
-        informative_pairs.extend([(pair, '1h') for pair in pairs])
+        informative_pairs = [(pair, '1h') for pair in pairs]
 
         if self.config['stake_currency'] in ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'PAX', 'USD', 'EUR', 'GBP']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
@@ -280,6 +278,7 @@ class HPStrategy(IStrategy):
         except Exception as ex:
             logging.error(str(ex))
 
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # logging.info("Populating indicators")
 
@@ -340,6 +339,8 @@ class HPStrategy(IStrategy):
         dataframe['fastk'] = stoch_fast['fastk']
         dataframe['adx'] = ta.ADX(dataframe)
         dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
+        dataframe['ema_21'] = ta.EMA(dataframe, timeperiod=21)
+        dataframe['ema_50'] = ta.EMA(dataframe, timeperiod=50)
 
         condition = dataframe['ema_8'] > dataframe['ema_14']
         percentage_difference = 100 * (dataframe['ema_8'] - dataframe['ema_14']).abs() / dataframe['ema_14']
@@ -414,12 +415,6 @@ class HPStrategy(IStrategy):
         ichi = ichimoku(dataframe)
         dataframe['senkou_span_a'] = ichi['senkou_span_a']
         dataframe['senkou_span_b'] = ichi['senkou_span_b']
-
-        informative_df_5m = self.dp.get_pair_dataframe(pair=metadata['pair'], timeframe='5m')
-        ichi_5m = ichimoku(informative_df_5m)
-        dataframe[f'open_5m'] = informative_df_5m['open']
-        dataframe[f'senkou_span_a_5m'] = ichi_5m['senkou_span_a']
-        dataframe[f'senkou_span_b_5m'] = ichi_5m['senkou_span_b']
 
         return dataframe
 
@@ -535,7 +530,6 @@ class HPStrategy(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        self.trades = Trade.get_open_trades()
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
@@ -552,12 +546,16 @@ class HPStrategy(IStrategy):
         diff_current = abs(ema_8_current - ema_14_current)
         diff_previous = abs(ema_8_previous - ema_14_previous)
 
+        # Výpočet procentní změny mezi diff_current a diff_previous
+        diff_change_pct = (diff_previous - diff_current) / diff_previous
+
         if 'unclog' in sell_reason or 'force' in sell_reason:
             logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
         elif current_profit >= 0.0025:
-            if ema_8_current <= ema_14_current:
-                logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current}, EXIT")
+            if ema_8_current <= ema_14_current and diff_change_pct >= 0.05:
+                logging.info(
+                    f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
                 return True
             elif ema_8_current > ema_14_current and diff_current > diff_previous:
                 logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
@@ -894,7 +892,7 @@ class HPStrategyTFJPA(HPStrategyTF):
             count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
             if self.max_safety_orders >= count_of_buys:
                 pct = current_profit * 100
-                pct_threshold = 1
+                pct_threshold = 3
                 if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
                     logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
