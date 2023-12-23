@@ -960,7 +960,7 @@ class HPStrategyTFJPA(HPStrategyTF):
                 # Kontrola, zda uplynulo alespoň 5 svíček od posledního nákupu
                 candle_interval = self.timeframe_to_minutes(self.timeframe)  # Převod timeframe na minuty
                 time_since_last_buy = (current_time - last_buy_time).total_seconds() / 60
-                if time_since_last_buy < 5 * candle_interval:
+                if time_since_last_buy < 60 * candle_interval:
                     return None
 
                 if self.max_safety_orders >= count_of_buys:
