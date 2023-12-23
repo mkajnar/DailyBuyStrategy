@@ -14,7 +14,7 @@ from pandas import DataFrame
 from technical.indicators import ichimoku
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
-from freqtrade.persistence import Trade, LocalTrade
+from freqtrade.persistence import Trade, LocalTrade, Order
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
@@ -278,7 +278,6 @@ class HPStrategy(IStrategy):
         except Exception as ex:
             logging.error(str(ex))
 
-
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # logging.info("Populating indicators")
 
@@ -524,6 +523,16 @@ class HPStrategy(IStrategy):
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
         # logging.info(f"Count opened trades is {Trade.get_open_trade_count()}")
+
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            df = dataframe.copy()
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        last_candle = df.iloc[-1].squeeze()
+
         result = Trade.get_open_trade_count() < self.out_open_trades_limit
         return result
 
@@ -813,53 +822,114 @@ class HPStrategyTF(HPStrategyDCA):
 
 
 class HPStrategyTFJPA(HPStrategyTF):
-    trailing_stop = True
-    trailing_only_offset_is_reached = True
-    trailing_stop_positive = 0.007
-    trailing_stop_positive_offset = 0.015
-    ignore_roi_if_buy_signal = True
+    support_dict = {}
+    resistance_dict = {}
 
     def version(self) -> str:
         return f"{super().version()} JPA "
 
+    def pivot_points(self, high, low, period=10):
+        pivot_high = high.rolling(window=2 * period + 1, center=True).max()
+        pivot_low = low.rolling(window=2 * period + 1, center=True).min()
+        return high == pivot_high, low == pivot_low
+
+    def calculate_support_resistance(self, df, period=10, loopback=290):
+        high_pivot, low_pivot = self.pivot_points(df['high'], df['low'], period)
+        df['resistance'] = df['high'][high_pivot]
+        df['support'] = df['low'][low_pivot]
+        return df
+
+    def calculate_support_resistance_dicts(self, pair: str, df: DataFrame):
+        try:
+            df = self.calculate_support_resistance(df)
+            self.support_dict[pair] = df['support'].dropna().tolist()
+            self.resistance_dict[pair] = df['resistance'].dropna().tolist()
+        except Exception as ex:
+            logging.error(str(ex))
+
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = super().populate_indicators(dataframe, metadata)
+        self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
+        return dataframe
+
     def calculate_dca_price(self, base_value, decline, target_percent):
         return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
+    # def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    #     dataframe.loc[:, 'buy_tag'] = ''
+    #     dataframe.loc[(dataframe['volume'] > 0) & (
+    #             dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
+    #     dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
+    #     return dataframe
+
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
-        # dataframe.loc[:, 'buy'] = 0
+        if metadata['pair'] in self.support_dict:
+            s = self.support_dict[metadata['pair']]
+            if s:
+                # Vypočítání nejbližší úrovně supportu pro každou svíčku
+                dataframe['nearest_support'] = dataframe['close'].apply(
+                    lambda x: min(s, key=lambda support: abs(x - support))
+                )
 
-        # try it uncomment for more signals
-        # dataframe = super().populate_buy_trend(dataframe, metadata)
+                # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem
+                dataframe['distance_to_support_pct'] = (dataframe['nearest_support'] - dataframe['close']) / dataframe[
+                    'close'] * 100
 
-        # ichi_cond = ((dataframe['open_5m'] > dataframe[f'senkou_span_a_5m'])
-        #              & (dataframe['open_5m'] > dataframe[f'senkou_span_b_5m']))
-        # dataframe.loc[ichi_cond, 'buy_tag'] += 'ichi_buy_signal'
-        # dataframe.loc[ichi_cond, 'buy'] = 1
+                # Vygenerování nákupních signálů
+                buy_threshold = 0.1  # 0.1 %
+                dataframe['below_support_previous'] = dataframe['close'].shift(1) < dataframe['nearest_support'].shift(
+                    1)
+                dataframe['above_support_current'] = dataframe['close'] > dataframe['nearest_support']
 
-        dataframe.loc[(dataframe['volume'] > 0) & (
-                dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
-        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
+                dataframe.loc[
+                    ((dataframe['distance_to_support_pct'] >= 0) & (
+                            dataframe['distance_to_support_pct'] <= buy_threshold)) |
+                    (dataframe['below_support_previous'] & dataframe['above_support_current']), 'buy'] = 1
+                dataframe.loc[
+                    ((dataframe['distance_to_support_pct'] >= 0) & (
+                            dataframe['distance_to_support_pct'] <= buy_threshold)) |
+                    (dataframe['below_support_previous'] & dataframe['above_support_current']), 'buy_tag'] += 'sr_buy'
+
+                # Odebrání pomocných sloupců
+                dataframe.drop(
+                    ['nearest_support', 'distance_to_support_pct', 'below_support_previous', 'above_support_current'],
+                    axis=1, inplace=True)
+
         return dataframe
 
     def populate_sell_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'sell_tag'] = ''
-        # dataframe.loc[:, 'sell'] = 0
-        dataframe = super().populate_sell_trend(dataframe, metadata)
+        if metadata['pair'] in self.resistance_dict:
+            r = self.resistance_dict[metadata['pair']]
+            # Výpočet nejbližší rezistence nad aktuální cenou
+            dataframe['nearest_resistance'] = dataframe['close'].apply(
+                lambda x: min([res for res in r if res >= x], default=np.nan)
+            )
 
-        # ichi_cond = ((dataframe['open_5m'] < dataframe[f'senkou_span_a_5m'])
-        #              & (dataframe['open_5m'] < dataframe[f'senkou_span_b_5m']))
-        # dataframe.loc[ichi_cond, 'sell_tag'] += 'ichi_sell_signal'
-        # dataframe.loc[ichi_cond, 'sell'] = 1
+            # Vygenerování prodejních signálů
+            for index, row in dataframe.iterrows():
+                nearest_resistance = row['nearest_resistance']
+                if not np.isnan(nearest_resistance):
+                    # Procentní rozdíl mezi cenou a nejbližší rezistencí
+                    price_diff = (nearest_resistance - row['close']) / row['close'] * 100
+                    # Nastavení prahu pro generování signálu prodeje
+                    sell_threshold = 0.1  # 0.1 %
+                    if price_diff >= 0 and price_diff <= sell_threshold:
+                        dataframe.at[index, 'sell'] = 1
+                        dataframe.at[index, 'sell_tag'] += 'sr_sell'
 
-        dataframe.loc[(dataframe['volume'] > 0) & (
-                dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell_tag'] += 'ema_diff_sell_signal'
-        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_sell_signal'].astype(int) > 0), 'sell'] = 1
+            # Odebrání pomocného sloupce
+            dataframe.drop('nearest_resistance', axis=1, inplace=True)
+
         return dataframe
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
+
+        current_time = datetime.utcnow()
+
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
             df = dataframe.copy()
@@ -867,47 +937,66 @@ class HPStrategyTFJPA(HPStrategyTF):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        # Výpočet rozdílů EMA
-        ema_8 = df['ema_8']
-        ema_14 = df['ema_14']
-        ema_diff = abs(ema_8 - ema_14)
+        # Výpočet nejbližšího supportu
+        if trade.pair in self.support_dict:
+            s = self.support_dict[trade.pair]
+            df['nearest_support'] = df['close'].apply(
+                lambda x: min(s, key=lambda support: abs(x - support))
+            )
 
-        # Kontrola zmenšování rozdílu EMA v posledních dvou svíčkách
-        if (ema_8.iat[-1] < ema_14.iat[-1]
-                and ema_diff.iat[-1] < ema_diff.iat[-2] < ema_diff.iat[-3]):
-            logging.info(f"DCA conditions met for {trade.pair}, proceeding with DCA purchase.")
-            highest_high = df['high'].rolling(9).max()
-            percentage_drop = (highest_high - df['close']) / highest_high * 100
-            dt = percentage_drop.tail(10)
-            if dt.is_monotonic_increasing:
-                logging.info(
-                    f"Percentage drop se pro {trade.pair} stále zvětšuje, DCA se neprovádí.")
-                return None
+            last_candle = df.iloc[-1]
+            nearest_support = last_candle['nearest_support']
+            distance_to_support_pct = (nearest_support - current_rate) / current_rate * 100
 
-            last_candle = df.iloc[-1].squeeze()
-            previous_candle = df.iloc[-2].squeeze()
-            if last_candle['close'] <= previous_candle['close']:
-                return None
+            # Kontrola, zda je cena těsně u supportu nebo ho prorazila
+            if (0 <= distance_to_support_pct <= 0.1) or (current_rate < nearest_support):
+                count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
 
-            count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-            if self.max_safety_orders >= count_of_buys:
-                pct = current_profit * 100
-                pct_threshold = 3
-                if pct <= -pct_threshold and last_candle['ema_diff_buy_signal'] == 1:
-                    logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                # Získání času posledního dokupování
+                last_buy_time = max([order.order_date for order in trade.orders if order.ft_order_side == 'buy'],
+                                    default=trade.open_date_utc)
+                last_buy_time = last_buy_time.replace(tzinfo=None)
 
-                    total_stake_amount = self.wallets.get_total_stake_amount()
-                    calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                    decline=current_profit * 100,
-                                                                    target_percent=0.7)
-                    if calculated_dca_stake > total_stake_amount:
-                        logging.info(f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
-                        return None
+                # Kontrola, zda uplynulo alespoň 5 svíček od posledního nákupu
+                candle_interval = self.timeframe_to_minutes(self.timeframe)  # Převod timeframe na minuty
+                time_since_last_buy = (current_time - last_buy_time).total_seconds() / 60
+                if time_since_last_buy < 5 * candle_interval:
+                    return None
 
-                    logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-                    return calculated_dca_stake
-        else:
-            logging.info(f"DCA conditions not met for {trade.pair}, skipping DCA purchase.")
-            return None
+                if self.max_safety_orders >= count_of_buys:
+                    pct = current_profit * 100
+                    base_pct_threshold = 3
+                    dynamic_pct_threshold = base_pct_threshold + (count_of_buys * 3)
+
+                    if pct <= -dynamic_pct_threshold / 100:
+
+                        lowest_order = sorted(trade.orders, key=lambda order: order.price, reverse=True)[0]
+
+                        if current_rate < lowest_order.price:
+
+                            logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+
+                            total_stake_amount = self.wallets.get_total_stake_amount()
+                            calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                            decline=current_profit * 100,
+                                                                            target_percent=0.3)
+                            if calculated_dca_stake > total_stake_amount:
+                                logging.info(
+                                    f'AP3 {trade.pair}, DCA: {calculated_dca_stake} > TOTAL: {total_stake_amount}')
+                                return None
+
+                            logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                            return calculated_dca_stake
 
         return None
+
+    def timeframe_to_minutes(self, timeframe):
+        """Převede timeframe na minuty."""
+        if timeframe.endswith('m'):
+            return int(timeframe[:-1])
+        elif timeframe.endswith('h'):
+            return int(timeframe[:-1]) * 60
+        elif timeframe.endswith('d'):
+            return int(timeframe[:-1]) * 1440
+        else:
+            raise ValueError("Neznámý timeframe: {}".format(timeframe))
