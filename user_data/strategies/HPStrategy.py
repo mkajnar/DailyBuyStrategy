@@ -58,7 +58,7 @@ class HPStrategy(IStrategy):
     locked = []
     stoploss = -0.99
 
-    out_open_trades_limit = 5
+    out_open_trades_limit = 4
     is_optimize_cofi = False
     use_sell_signal = True
     sell_profit_only = True
@@ -415,6 +415,15 @@ class HPStrategy(IStrategy):
         ichi = ichimoku(dataframe)
         dataframe['senkou_span_a'] = ichi['senkou_span_a']
         dataframe['senkou_span_b'] = ichi['senkou_span_b']
+
+        # Vytvoření vah pro vážený průměr
+        weights = np.linspace(1, 0, 300)  # Váhy od 1 (nejnovější) do 0 (nejstarší)
+        weights /= weights.sum()  # Normalizace vah tak, aby jejich součet byl 1
+
+        # Výpočet váženého průměru RSI pro posledních 300 svící
+        dataframe['weighted_rsi'] = dataframe['rsi'].rolling(window=300).apply(
+            lambda x: np.sum(weights * x[-300:]), raw=False
+        )
 
         return dataframe
 
@@ -856,45 +865,53 @@ class HPStrategyTFJPA(HPStrategyTF):
     def calculate_dca_price(self, base_value, decline, target_percent):
         return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
-    # def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-    #     dataframe.loc[:, 'buy_tag'] = ''
-    #     dataframe.loc[(dataframe['volume'] > 0) & (
-    #             dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
-    #     dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
-    #     return dataframe
-
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        logging.info(f"PBT: {metadata['pair']}")
         dataframe.loc[:, 'buy_tag'] = ''
-        dataframe = super().populate_buy_trend(dataframe, metadata)
 
+        # Kontrola vzdálenosti k supportu
         if metadata['pair'] in self.support_dict:
             s = self.support_dict[metadata['pair']]
             if s:
+                # Vypočítání nejbližší úrovně supportu pro každou svíčku
                 dataframe['nearest_support'] = dataframe['close'].apply(
                     lambda x: min(s, key=lambda support: abs(x - support))
                 )
-                dataframe['distance_to_support_pct'] = (dataframe['nearest_support'] - dataframe['close']) / dataframe[
-                    'close'] * 100
-                buy_threshold = 0.1  # 0.1 %
-                dataframe['below_support_previous'] = dataframe['close'].shift(1) < dataframe['nearest_support'].shift(
-                    1)
-                dataframe['above_support_current'] = dataframe['close'] > dataframe['nearest_support']
-                dataframe.loc[((dataframe['distance_to_support_pct'] >= 0) & (
-                            dataframe['distance_to_support_pct'] <= buy_threshold)) | (
-                                          dataframe['below_support_previous'] & dataframe[
-                                      'above_support_current']), 'buy'] = 1
-                dataframe.loc[((dataframe['distance_to_support_pct'] >= 0) & (
-                            dataframe['distance_to_support_pct'] <= buy_threshold)) | (
-                                          dataframe['below_support_previous'] & dataframe[
-                                      'above_support_current']), 'buy_tag'] += 'sr_ema_rsi_buy'
-                dataframe.drop(
-                    ['nearest_support', 'distance_to_support_pct', 'below_support_previous', 'above_support_current'],
-                    axis=1, inplace=True)
 
-        dataframe.loc[(dataframe['volume'] > 0) & (
-                    dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_diff_buy_signal'
-        dataframe.loc[(dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy'] = 1
+                # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem
+                dataframe['distance_to_support_pct'] = (
+                                                               dataframe['nearest_support'] - dataframe['close']) / \
+                                                       dataframe['close'] * 100
+
+                # Vygenerování nákupních signálů na základě supportu
+                buy_threshold = 0.1  # 0.1 %
+                dataframe.loc[
+                    (dataframe['distance_to_support_pct'] >= 0) &
+                    (dataframe['distance_to_support_pct'] <= buy_threshold),
+                    'buy_support'
+                ] = 1
+
+                dataframe.loc[
+                    (dataframe['distance_to_support_pct'] >= 0) &
+                    (dataframe['distance_to_support_pct'] <= buy_threshold),
+                    'buy_tag'
+                ] += 'sr_buy'
+
+                # Odebrání pomocných sloupců
+                dataframe.drop(['nearest_support', 'distance_to_support_pct'],
+                               axis=1, inplace=True)
+
+        # Přidání podmínek pro EMA a objem
+        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
+        dataframe.loc[
+            (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_dbs_'
+
+        # Generování nákupních signálů pouze pokud jsou splněny obě podmínky
+        dataframe['buy'] = 0
+        dataframe.loc[(dataframe['buy_support'] == 1) & (dataframe['buy_ema'] == 1) & (dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
+
+        # Odebrání pomocných sloupců
+        dataframe.drop(['buy_support', 'buy_ema'], axis=1, inplace=True)
+
         return dataframe
 
     def calculate_percentage_difference(self, original_price, current_price):
@@ -978,29 +995,34 @@ class HPStrategyTFJPA(HPStrategyTF):
                     # Kontrola, zda je procentní rozdíl menší než prahová hodnota
                     if pct_diff <= pct_threshold:
                         if last_buy_order and current_rate < last_buy_order.price:
-                            # Logování informací o obchodu
-                            logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                            # Kontrola RSI podmínky pro DCA
+                            rsi_value = last_candle['rsi']  # Předpokládá se, že RSI je součástí dataframe
+                            w_rsi = last_candle['weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
 
-                            # Získání celkové částky sázky v peněžence
-                            total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
+                            if rsi_value <= w_rsi:
+                                # Logování informací o obchodu
+                                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
-                            # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
-                            calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                            decline=current_profit * 100,
-                                                                            target_percent=1)  # Datový typ: float
+                                # Získání celkové částky sázky v peněžence
+                                total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
 
-                            # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
-                            while calculated_dca_stake >= total_stake_amount:
-                                calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
+                                # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
+                                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                                decline=current_profit * 100,
+                                                                                target_percent=1)  # Datový typ: float
 
-                            # Logování informací o upravené sázce
-                            logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                                # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
+                                while calculated_dca_stake >= total_stake_amount:
+                                    calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
 
-                            # Vrácení upravené velikosti sázky
-                            return calculated_dca_stake
+                                # Logování informací o upravené sázce
+                                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
 
-        # Vrácení None, pokud nejsou splněny podmínky pro upravení obchodní pozice
-        return None
+                                # Vrácení upravené velikosti sázky
+                                return calculated_dca_stake
+
+            # Vrácení None, pokud nejsou splněny podmínky pro upravení obchodní pozice
+            return None
 
     def timeframe_to_minutes(self, timeframe):
         """Převede timeframe na minuty."""
