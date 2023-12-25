@@ -849,17 +849,57 @@ class HPStrategyTFJPA(HPStrategyTF):
         df['support'] = df['low'][low_pivot]
         return df
 
+
     def calculate_support_resistance_dicts(self, pair: str, df: DataFrame):
         try:
             df = self.calculate_support_resistance(df)
-            self.support_dict[pair] = df['support'].dropna().tolist()
-            self.resistance_dict[pair] = df['resistance'].dropna().tolist()
+            self.support_dict[pair] = self.calculate_dynamic_clusters(df['support'].dropna().tolist(), 4)
+            self.resistance_dict[pair] = self.calculate_dynamic_clusters(df['resistance'].dropna().tolist(), 4)
         except Exception as ex:
             logging.error(str(ex))
+
+    def calculate_dynamic_clusters(self, values, max_clusters):
+        """
+        Dynamicky vypočítá průměrované shluky z daného seznamu hodnot.
+
+        Args:
+        values (list): Seznam hodnot pro shlukování.
+        max_clusters (int): Maximální počet shluků, který se má vytvořit.
+
+        Returns:
+        list: Seznam průměrných hodnot pro každý vytvořený shluk.
+        """
+
+        def cluster_values(threshold):
+            sorted_values = sorted(values)
+            clusters = []
+            current_cluster = [sorted_values[0]]
+
+            for value in sorted_values[1:]:
+                if value - current_cluster[-1] <= threshold:
+                    current_cluster.append(value)
+                else:
+                    clusters.append(current_cluster)
+                    current_cluster = [value]
+
+            clusters.append(current_cluster)
+            return clusters
+
+        threshold = 0.3  # Počáteční prahová hodnota
+        while True:
+            clusters = cluster_values(threshold)
+            if len(clusters) <= max_clusters:
+                break
+            threshold += 0.3
+
+        # Výpočet průměrů pro každý shluk
+        cluster_averages = [round(sum(cluster) / len(cluster), 2) for cluster in clusters]
+        return cluster_averages
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_indicators(dataframe, metadata)
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
+        # logging.info(f"Support dict: {json.dumps(self.support_dict)}")
         return dataframe
 
     def calculate_dca_price(self, base_value, decline, target_percent):
@@ -872,33 +912,36 @@ class HPStrategyTFJPA(HPStrategyTF):
         if metadata['pair'] in self.support_dict:
             s = self.support_dict[metadata['pair']]
             if s:
-                # Vypočítání nejbližší úrovně supportu pro každou svíčku
+                # Vypočítání nejbližší úrovně supportu pro každou svíčku, která je pod aktuální cenou
                 dataframe['nearest_support'] = dataframe['close'].apply(
-                    lambda x: min(s, key=lambda support: abs(x - support))
+                    lambda x: min([support for support in s if support <= x], default=x,
+                                  key=lambda support: abs(x - support))
                 )
 
-                # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem
-                dataframe['distance_to_support_pct'] = (
-                                                               dataframe['nearest_support'] - dataframe['close']) / \
-                                                       dataframe['close'] * 100
+                if 'nearest_support' in dataframe.columns:
 
-                # Vygenerování nákupních signálů na základě supportu
-                buy_threshold = 0.1  # 0.1 %
-                dataframe.loc[
-                    (dataframe['distance_to_support_pct'] >= 0) &
-                    (dataframe['distance_to_support_pct'] <= buy_threshold),
-                    'buy_support'
-                ] = 1
+                    # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem
+                    dataframe['distance_to_support_pct'] = (
+                                                                   dataframe['nearest_support'] - dataframe['close']) / \
+                                                           dataframe['close'] * 100
 
-                dataframe.loc[
-                    (dataframe['distance_to_support_pct'] >= 0) &
-                    (dataframe['distance_to_support_pct'] <= buy_threshold),
-                    'buy_tag'
-                ] += 'sr_buy'
+                    # Vygenerování nákupních signálů na základě supportu
+                    buy_threshold = 0.1  # 0.1 %
+                    dataframe.loc[
+                        (dataframe['distance_to_support_pct'] >= 0) &
+                        (dataframe['distance_to_support_pct'] <= buy_threshold),
+                        'buy_support'
+                    ] = 1
 
-                # Odebrání pomocných sloupců
-                dataframe.drop(['nearest_support', 'distance_to_support_pct'],
-                               axis=1, inplace=True)
+                    dataframe.loc[
+                        (dataframe['distance_to_support_pct'] >= 0) &
+                        (dataframe['distance_to_support_pct'] <= buy_threshold),
+                        'buy_tag'
+                    ] += 'sr_buy'
+
+                    # Odebrání pomocných sloupců
+                    dataframe.drop(['nearest_support', 'distance_to_support_pct'],
+                                   axis=1, inplace=True)
 
         # Přidání podmínek pro EMA a objem
         dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
@@ -907,7 +950,8 @@ class HPStrategyTFJPA(HPStrategyTF):
 
         # Generování nákupních signálů pouze pokud jsou splněny obě podmínky
         dataframe['buy'] = 0
-        dataframe.loc[(dataframe['buy_support'] == 1) & (dataframe['buy_ema'] == 1) & (dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
+        dataframe.loc[(dataframe['buy_support'] == 1) & (dataframe['buy_ema'] == 1) & (
+                    dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
 
         # Odebrání pomocných sloupců
         dataframe.drop(['buy_support', 'buy_ema'], axis=1, inplace=True)
@@ -940,87 +984,76 @@ class HPStrategyTFJPA(HPStrategyTF):
 
             # Výpočet nejbližší podpory pro každou cenu uzavření v dataframe
             df['nearest_support'] = df['close'].apply(
-                lambda x: min(s, key=lambda support: abs(x - support))
+                lambda x: min([support for support in s if support <= x], default=x,
+                              key=lambda support: abs(x - support))
             )
 
-            # Získání poslední svíčky (candle) z dataframe
-            last_candle = df.iloc[-1]  # Datový typ: pandas Series
-            nearest_support = last_candle['nearest_support']  # Datový typ: float
+            if 'nearest_support' in df.columns:
 
-            # Výpočet procentní vzdálenosti k nejbližší podpoře
-            distance_to_support_pct = abs(
-                (nearest_support - current_rate) / current_rate)  # Datový typ: float, jednotka: %
+                # Získání poslední svíčky (candle) z dataframe
+                last_candle = df.iloc[-1]  # Datový typ: pandas Series
 
-            # Kontrola, zda je aktuální kurz blízko nebo pod nejbližší podporou
-            if (0 <= distance_to_support_pct <= 0.01) or (current_rate < nearest_support):
-                # Počítání uzavřených nákupních příkazů
-                count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in
-                                    trade.orders)  # Datový typ: int
+                if 'nearest_support' in last_candle:
+                    nearest_support = last_candle['nearest_support']  # Datový typ: float
+                    # Výpočet procentní vzdálenosti k nejbližší podpoře
+                    distance_to_support_pct = abs(
+                        (nearest_support - current_rate) / current_rate)  # Datový typ: float, jednotka: %
+                    # Kontrola, zda je aktuální kurz blízko nebo pod nejbližší podporou
+                    if (0 <= distance_to_support_pct <= 0.01) or (current_rate < nearest_support):
+                        # Počítání uzavřených nákupních příkazů
+                        count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in
+                                            trade.orders)  # Datový typ: int
+                        # Zjištění času posledního nákupu
+                        last_buy_time = max([order.order_date for order in trade.orders if order.ft_order_side == 'buy'],
+                                            default=trade.open_date_utc)
+                        last_buy_time = last_buy_time.replace(tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
+                        # Výpočet intervalu svíčky (candle) v minutách
+                        candle_interval = self.timeframe_to_minutes(self.timeframe)  # Datový typ: int, jednotka: minuty
+                        # Výpočet času od posledního nákupu v minutách
+                        time_since_last_buy = (current_time - last_buy_time).total_seconds() / 60  # Datový typ: float, jednotka: minuty
+                        # Výpočet počtu svíček, které musí uplynout před dalším nákupem
+                        candles = 60 + (30 * (count_of_buys - 1))  # Datový typ: int
+                        # Kontrola, zda uplynul dostatečný čas od posledního nákupu
+                        if time_since_last_buy < candles * candle_interval:
+                            return None
+                        # Kontrola, zda počet bezpečnostních příkazů (safety orders) není překročen
+                        if self.max_safety_orders >= count_of_buys:
+                            # Hledání posledního uzavřeného nákupního příkazu
+                            last_buy_order = None
+                            for order in reversed(trade.orders):
+                                if order.ft_order_side == 'buy' and order.status == 'closed':
+                                    last_buy_order = order
+                                    break
+                            # Definice prahové hodnoty pro další nákup
+                            pct_threshold = -0.03  # Datový typ: float, jednotka: %
+                            # Výpočet procentní rozdílu mezi posledním nákupním příkazem a aktuálním kurzem
+                            pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
+                                                                            current_price=current_rate)  # Datový typ: float, jednotka: %
+                            # Kontrola, zda je procentní rozdíl menší než prahová hodnota
+                            if pct_diff <= pct_threshold:
+                                if last_buy_order and current_rate < last_buy_order.price:
+                                    # Kontrola RSI podmínky pro DCA
+                                    rsi_value = last_candle['rsi']  # Předpokládá se, že RSI je součástí dataframe
+                                    w_rsi = last_candle['weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
 
-                # Zjištění času posledního nákupu
-                last_buy_time = max([order.order_date for order in trade.orders if order.ft_order_side == 'buy'],
-                                    default=trade.open_date_utc)
-                last_buy_time = last_buy_time.replace(tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
+                                    if rsi_value <= w_rsi:
+                                        # Logování informací o obchodu
+                                        logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
-                # Výpočet intervalu svíčky (candle) v minutách
-                candle_interval = self.timeframe_to_minutes(self.timeframe)  # Datový typ: int, jednotka: minuty
+                                        # Získání celkové částky sázky v peněžence
+                                        total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
 
-                # Výpočet času od posledního nákupu v minutách
-                time_since_last_buy = (
-                                              current_time - last_buy_time).total_seconds() / 60  # Datový typ: float, jednotka: minuty
-
-                # Výpočet počtu svíček, které musí uplynout před dalším nákupem
-                candles = 60 + (30 * (count_of_buys - 1))  # Datový typ: int
-
-                # Kontrola, zda uplynul dostatečný čas od posledního nákupu
-                if time_since_last_buy < candles * candle_interval:
-                    return None
-
-                # Kontrola, zda počet bezpečnostních příkazů (safety orders) není překročen
-                if self.max_safety_orders >= count_of_buys:
-                    # Hledání posledního uzavřeného nákupního příkazu
-                    last_buy_order = None
-                    for order in reversed(trade.orders):
-                        if order.ft_order_side == 'buy' and order.status == 'closed':
-                            last_buy_order = order
-                            break
-
-                    # Definice prahové hodnoty pro další nákup
-                    pct_threshold = -0.03  # Datový typ: float, jednotka: %
-
-                    # Výpočet procentní rozdílu mezi posledním nákupním příkazem a aktuálním kurzem
-                    pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
-                                                                    current_price=current_rate)  # Datový typ: float, jednotka: %
-
-                    # Kontrola, zda je procentní rozdíl menší než prahová hodnota
-                    if pct_diff <= pct_threshold:
-                        if last_buy_order and current_rate < last_buy_order.price:
-                            # Kontrola RSI podmínky pro DCA
-                            rsi_value = last_candle['rsi']  # Předpokládá se, že RSI je součástí dataframe
-                            w_rsi = last_candle['weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
-
-                            if rsi_value <= w_rsi:
-                                # Logování informací o obchodu
-                                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
-
-                                # Získání celkové částky sázky v peněžence
-                                total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
-
-                                # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
-                                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                                decline=current_profit * 100,
-                                                                                target_percent=1)  # Datový typ: float
-
-                                # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
-                                while calculated_dca_stake >= total_stake_amount:
-                                    calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
-
-                                # Logování informací o upravené sázce
-                                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-
-                                # Vrácení upravené velikosti sázky
-                                return calculated_dca_stake
-
+                                        # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
+                                        calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                                        decline=current_profit * 100,
+                                                                                        target_percent=1)  # Datový typ: float
+                                        # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
+                                        while calculated_dca_stake >= total_stake_amount:
+                                            calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
+                                        # Logování informací o upravené sázce
+                                        logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                                        # Vrácení upravené velikosti sázky
+                                        return calculated_dca_stake
             # Vrácení None, pokud nejsou splněny podmínky pro upravení obchodní pozice
             return None
 
