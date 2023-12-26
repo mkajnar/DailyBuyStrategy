@@ -427,7 +427,8 @@ class HPStrategy(IStrategy):
 
         # Přidání signálu 'jstkr'
         # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
-        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17).astype(int)
+        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17)).astype(int)
+        dataframe['jstkr_2'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.2) &(dataframe['rsi'] < 25)).astype('int')
 
         return dataframe
 
@@ -1149,8 +1150,8 @@ class HPStrategyJSTKR(HPStrategyTFJPA):
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_buy_trend(dataframe, metadata)
-        dataframe.loc[(dataframe['jstkr'] == 1), 'buy'] = 1
-        dataframe.loc[(dataframe['jstkr'] == 1), 'buy_tag'] += 'jstkr_'
+        dataframe.loc[(dataframe['jstkr_2'] == 1), 'buy'] = 1
+        dataframe.loc[(dataframe['jstkr_2'] == 1), 'buy_tag'] += 'jstkr_2_'
         return dataframe
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
@@ -1170,7 +1171,7 @@ class HPStrategyJSTKR(HPStrategyTFJPA):
                 logging.error(f"Error getting analyzed dataframe: {e}")
                 return None
             last_candle = df.iloc[-1]
-            if last_candle['jstkr'] > 0:
+            if last_candle['jstkr_2'] > 0:
                 # Logování informací o obchodu
                 logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
                 # Získání celkové částky sázky v peněžence
