@@ -1,8 +1,8 @@
 {
-    "max_open_trades": 50,
+    "max_open_trades": 30,
     "stake_currency": "USDT",
     "stake_amount": "unlimited",
-    "tradable_balance_ratio": 1,
+    "tradable_balance_ratio": 0.9,
     "fiat_display_currency": "USD",
     "timeframe": "1m",
     "dry_run": true,
@@ -41,8 +41,8 @@
             "timeout": 60000,
             "urls": {
                 "api": {
-                    "public": "http://proxy:8080/kucoin",
-                    "private": "http://proxy:8080/kucoin"
+                    "public": "http://proxy_real:8080/kucoin",
+                    "private": "http://proxy_real:8080/kucoin"
                 }
             }
         },
@@ -50,23 +50,27 @@
             "enableRateLimit": true,
             "timeout": 60000
         },
-        "pair_whitelist": ["BTC/USDT"],
-        "pair_blacklist": []
+           "pair_whitelist": ["BTC/USDT"],
+           "pair_blacklist": ["ICP/USDT","BONK/USDT","RATS/USDT","MAPS/USDT","USDC/USDT","BIIS/USDT","SEI/USDT","ROSE/USDT"]
     },
     "pairlists": [
-        {
-            "method": "VolumePairList",
-            "number_assets": 50,
-            "sort_key": "quoteVolume",
-            "min_value": 500000,
-            "refresh_period": 1800,
-            "lookback_timeframe": "1m"
-          },
-          {
-            "method": "PriceFilter",
-            "max_price": 5,
-            "min_price": 0.05
-          }
+
+         {
+    "method": "VolumePairList",
+    "number_assets": 50,
+    "sort_key": "quoteVolume",
+    "min_value": 1000,
+    "refresh_period": 1800,
+    "lookback_timeframe": "1m",
+    "lookback_period": 100
+  },
+  {
+    "method": "RangeStabilityFilter",
+    "lookback_days": 10,
+    "min_rate_of_change": 0.5,
+    "max_rate_of_change": 3,
+    "refresh_period": 1800
+  }
     ],
     "api_server": {
         "enabled": true,
@@ -74,8 +78,8 @@
         "listen_port": 8080,
         "verbosity": "error",
         "enable_openapi": false,
-        "jwt_secret_key": "ae412db3a7d3c4076e92088109331deaeed58d0840e41aeb04afbc37f66388cb",
-        "ws_token": "P3RWZvSHaCxv39j_bj7WF2OU1BJmzRujIA",
+        "jwt_secret_key": "",
+        "ws_token": "",
         "CORS_origins": [],
         "username": "freqtrade",
         "password": "freqtrade"
