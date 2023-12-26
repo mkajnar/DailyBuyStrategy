@@ -425,6 +425,10 @@ class HPStrategy(IStrategy):
             lambda x: np.sum(weights * x[-300:]), raw=False
         )
 
+        # Přidání signálu 'jstkr'
+        # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
+        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < 0) & (dataframe['rsi'] <= 24)).astype(int)
+
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -849,7 +853,6 @@ class HPStrategyTFJPA(HPStrategyTF):
         df['support'] = df['low'][low_pivot]
         return df
 
-
     def calculate_support_resistance_dicts(self, pair: str, df: DataFrame):
         try:
             df = self.calculate_support_resistance(df)
@@ -984,7 +987,6 @@ class HPStrategyTFJPA(HPStrategyTF):
                 )
 
                 if 'nearest_support' in dataframe.columns:
-
                     # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem
                     dataframe['distance_to_support_pct'] = (
                                                                    dataframe['nearest_support'] - dataframe['close']) / \
@@ -1015,7 +1017,7 @@ class HPStrategyTFJPA(HPStrategyTF):
 
         # Generování nákupních signálů pouze pokud jsou splněny obě podmínky
         dataframe.loc[(dataframe['buy_support'] == 1) & (dataframe['buy_ema'] == 1) & (
-                    dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
+                dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
 
         # Odebrání pomocných sloupců
         if 'buy_support' in dataframe.columns:
@@ -1071,13 +1073,16 @@ class HPStrategyTFJPA(HPStrategyTF):
                         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in
                                             trade.orders)  # Datový typ: int
                         # Zjištění času posledního nákupu
-                        last_buy_time = max([order.order_date for order in trade.orders if order.ft_order_side == 'buy'],
-                                            default=trade.open_date_utc)
-                        last_buy_time = last_buy_time.replace(tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
+                        last_buy_time = max(
+                            [order.order_date for order in trade.orders if order.ft_order_side == 'buy'],
+                            default=trade.open_date_utc)
+                        last_buy_time = last_buy_time.replace(
+                            tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
                         # Výpočet intervalu svíčky (candle) v minutách
                         candle_interval = self.timeframe_to_minutes(self.timeframe)  # Datový typ: int, jednotka: minuty
                         # Výpočet času od posledního nákupu v minutách
-                        time_since_last_buy = (current_time - last_buy_time).total_seconds() / 60  # Datový typ: float, jednotka: minuty
+                        time_since_last_buy = (
+                                                      current_time - last_buy_time).total_seconds() / 60  # Datový typ: float, jednotka: minuty
                         # Výpočet počtu svíček, které musí uplynout před dalším nákupem
                         candles = 60 + (30 * (count_of_buys - 1))  # Datový typ: int
                         # Kontrola, zda uplynul dostatečný čas od posledního nákupu
@@ -1101,11 +1106,13 @@ class HPStrategyTFJPA(HPStrategyTF):
                                 if last_buy_order and current_rate < last_buy_order.price:
                                     # Kontrola RSI podmínky pro DCA
                                     rsi_value = last_candle['rsi']  # Předpokládá se, že RSI je součástí dataframe
-                                    w_rsi = last_candle['weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
+                                    w_rsi = last_candle[
+                                        'weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
 
                                     if rsi_value <= w_rsi:
                                         # Logování informací o obchodu
-                                        logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                                        logging.info(
+                                            f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
                                         # Získání celkové částky sázky v peněžence
                                         total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
@@ -1134,3 +1141,49 @@ class HPStrategyTFJPA(HPStrategyTF):
             return int(timeframe[:-1]) * 1440
         else:
             raise ValueError("Neznámý timeframe: {}".format(timeframe))
+
+
+class HPStrategyJSTKR(HPStrategyTFJPA):
+    def version(self) -> str:
+        return f"{super().version()} JSTKR "
+
+    def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = super().populate_buy_trend(dataframe, metadata)
+        dataframe.loc[(dataframe['jstkr'] == 1), 'buy'] = 1
+        dataframe.loc[(dataframe['jstkr'] == 1), 'buy_tag'] += 'jstkr_'
+        return dataframe
+
+    def adjust_trade_position(self, trade: Trade, current_time: datetime,
+                              current_rate: float, current_profit: float, min_stake: float,
+                              max_stake: float, **kwargs):
+        stake_adjusted = super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake,
+                                                       max_stake, **kwargs)
+        if stake_adjusted:
+            return stake_adjusted
+        else:
+            try:
+                # Získání analyzovaného dataframe pro daný obchodní pár a časový rámec...
+                dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+                df = dataframe.copy()  # Datový typ: pandas DataFrame
+            except Exception as e:
+                # Logování chyby při získávání dataframe a ukončení metody
+                logging.error(f"Error getting analyzed dataframe: {e}")
+                return None
+            last_candle = df.iloc[-1]
+            if last_candle['jstkr'] > 0:
+                # Logování informací o obchodu
+                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                # Získání celkové částky sázky v peněžence
+                total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
+                # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
+                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                decline=current_profit * 100,
+                                                                target_percent=1)  # Datový typ: float
+                # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
+                while calculated_dca_stake >= total_stake_amount:
+                    calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
+                # Logování informací o upravené sázce
+                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                # Vrácení upravené velikosti sázky
+                return calculated_dca_stake
+        return None
