@@ -905,8 +905,73 @@ class HPStrategyTFJPA(HPStrategyTF):
     def calculate_dca_price(self, base_value, decline, target_percent):
         return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
+    def populate_buy_trend_sr(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # Kontrola vzdálenosti k supportu a resistenci
+        if metadata['pair'] in self.support_dict and metadata['pair'] in self.resistance_dict:
+            supports = self.support_dict[metadata['pair']]
+            resistances = self.resistance_dict[metadata['pair']]
+
+            if supports and resistances:
+                # Vypočítání nejbližší úrovně supportu a resistence pro každou svíčku
+                dataframe['nearest_support'] = dataframe['close'].apply(
+                    lambda x: min([support for support in supports if support <= x], default=x,
+                                  key=lambda support: abs(x - support))
+                )
+                dataframe['nearest_resistance'] = dataframe['close'].apply(
+                    lambda x: min([resistance for resistance in resistances if resistance >= x], default=x,
+                                  key=lambda resistance: abs(x - resistance))
+                )
+
+                # Vypočítání procentního rozdílu mezi cenou a nejbližším supportem/resistencí
+                dataframe['distance_to_support_pct'] = (
+                                                               dataframe['nearest_support'] - dataframe['close']) / \
+                                                       dataframe['close'] * 100
+                dataframe['distance_to_resistance_pct'] = (
+                                                                  dataframe['nearest_resistance'] - dataframe[
+                                                              'close']) / dataframe['close'] * 100
+
+                # Vygenerování nákupních signálů na základě supportu a resistence
+                buy_threshold = 0.1  # 0.1 %
+                dataframe.loc[
+                    (dataframe['distance_to_support_pct'] >= 0) &
+                    (dataframe['distance_to_support_pct'] <= buy_threshold) &
+                    (dataframe['distance_to_resistance_pct'] >= buy_threshold),
+                    'buy_signal'
+                ] = 1
+
+                dataframe.loc[
+                    (dataframe['distance_to_support_pct'] >= 0) &
+                    (dataframe['distance_to_support_pct'] <= buy_threshold) &
+                    (dataframe['distance_to_resistance_pct'] >= buy_threshold),
+                    'buy_tag'
+                ] += 'sr_buy_mid'
+
+                # Odebrání pomocných sloupců
+                dataframe.drop(
+                    ['nearest_support', 'nearest_resistance', 'distance_to_support_pct', 'distance_to_resistance_pct'],
+                    axis=1, inplace=True)
+
+        # Přidání podmínek pro EMA a objem
+        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
+        dataframe.loc[
+            (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_dbs_'
+
+        # Generování nákupních signálů pouze pokud jsou splněny obě podmínky
+        dataframe.loc[(dataframe['buy_signal'] == 1) & (dataframe['buy_ema'] == 1) & (
+                dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
+
+        # Odebrání pomocných sloupců
+        if 'buy_support' in dataframe.columns:
+            dataframe.drop(['buy_support'], axis=1, inplace=True)
+        if 'buy_ema' in dataframe.columns:
+            dataframe.drop(['buy_ema'], axis=1, inplace=True)
+
+        return dataframe
+
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'buy_tag'] = ''
+        dataframe = super().populate_buy_trend(dataframe, metadata)
+        dataframe = self.populate_buy_trend_sr(dataframe=dataframe, metadata=metadata)
 
         # Kontrola vzdálenosti k supportu
         if metadata['pair'] in self.support_dict:
@@ -949,12 +1014,14 @@ class HPStrategyTFJPA(HPStrategyTF):
             (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_tag'] += 'ema_dbs_'
 
         # Generování nákupních signálů pouze pokud jsou splněny obě podmínky
-        dataframe['buy'] = 0
         dataframe.loc[(dataframe['buy_support'] == 1) & (dataframe['buy_ema'] == 1) & (
                     dataframe['rsi'] <= dataframe['weighted_rsi']), 'buy'] = 1
 
         # Odebrání pomocných sloupců
-        dataframe.drop(['buy_support', 'buy_ema'], axis=1, inplace=True)
+        if 'buy_support' in dataframe.columns:
+            dataframe.drop(['buy_support'], axis=1, inplace=True)
+        if 'buy_ema' in dataframe.columns:
+            dataframe.drop(['buy_ema'], axis=1, inplace=True)
 
         return dataframe
 
