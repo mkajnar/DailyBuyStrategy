@@ -427,7 +427,7 @@ class HPStrategy(IStrategy):
 
         # Přidání signálu 'jstkr'
         # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
-        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < 0) & (dataframe['rsi'] <= 24)).astype(int)
+        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17).astype(int)
 
         return dataframe
 
