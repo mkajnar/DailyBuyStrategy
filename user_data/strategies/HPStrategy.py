@@ -428,8 +428,8 @@ class HPStrategy(IStrategy):
         # Přidání signálu 'jstkr'
         # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
         dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17)).astype(int)
-        dataframe['jstkr_2'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.2) &(dataframe['rsi'] < 25)).astype('int')
-
+        dataframe['jstkr_2'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.2) & (dataframe['rsi'] <= 25)).astype('int')
+        dataframe['jstkr_3'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.04) & (dataframe['rsi_fast'] <= 10)).astype('int')
         return dataframe
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -1150,41 +1150,63 @@ class HPStrategyJSTKR(HPStrategyTFJPA):
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe = super().populate_buy_trend(dataframe, metadata)
-        dataframe.loc[(dataframe['jstkr_2'] == 1), 'buy'] = 1
-        dataframe.loc[(dataframe['jstkr_2'] == 1), 'buy_tag'] += 'jstkr_2_'
+        dataframe.loc[(dataframe['jstkr_3'] == 1), 'buy'] = 1
+        dataframe.loc[(dataframe['jstkr_3'] == 1), 'buy_tag'] += 'jstkr_3_'
         return dataframe
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
-        stake_adjusted = super().adjust_trade_position(trade, current_time, current_rate, current_profit, min_stake,
-                                                       max_stake, **kwargs)
-        if stake_adjusted:
-            return stake_adjusted
-        else:
-            try:
-                # Získání analyzovaného dataframe pro daný obchodní pár a časový rámec...
-                dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-                df = dataframe.copy()  # Datový typ: pandas DataFrame
-            except Exception as e:
-                # Logování chyby při získávání dataframe a ukončení metody
-                logging.error(f"Error getting analyzed dataframe: {e}")
+
+        # Aktualizace aktuálního času na současný čas UTC
+        current_time = datetime.utcnow()  # Datový typ: datetime
+        try:
+            # Získání analyzovaného dataframe pro daný obchodní pár a časový rámec
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            df = dataframe.copy()  # Datový typ: pandas DataFrame
+        except Exception as e:
+            # Logování chyby při získávání dataframe a ukončení metody
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        last_candle = df.iloc[-1]  # Datový typ: pandas Series
+        if last_candle['jstkr_3'] > 0:
+            count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)  # Datový typ: int
+            # Zjištění času posledního nákupu
+            last_buy_time = max( [order.order_date for order in trade.orders if order.ft_order_side == 'buy'], default=trade.open_date_utc)
+            last_buy_time = last_buy_time.replace(tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
+            # Výpočet intervalu svíčky (candle) v minutách
+            candle_interval = self.timeframe_to_minutes(self.timeframe)  # Datový typ: int, jednotka: minuty
+            # Výpočet času od posledního nákupu v minutách
+            time_since_last_buy = (current_time - last_buy_time).total_seconds() / 60  # Datový typ: float, jednotka: minuty
+            # Výpočet počtu svíček, které musí uplynout před dalším nákupem
+            candles = 60 + (30 * (count_of_buys - 1))  # Datový typ: int
+            # Kontrola, zda uplynul dostatečný čas od posledního nákupu
+            if time_since_last_buy < candles * candle_interval:
                 return None
-            last_candle = df.iloc[-1]
-            if last_candle['jstkr_2'] > 0:
-                # Logování informací o obchodu
-                logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
-                # Získání celkové částky sázky v peněžence
-                total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
-                # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
-                calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                decline=current_profit * 100,
-                                                                target_percent=1)  # Datový typ: float
-                # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
-                while calculated_dca_stake >= total_stake_amount:
-                    calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
-                # Logování informací o upravené sázce
-                logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-                # Vrácení upravené velikosti sázky
-                return calculated_dca_stake
-        return None
+            last_buy_order = None
+            for order in reversed(trade.orders):
+                if order.ft_order_side == 'buy' and order.status == 'closed':
+                    last_buy_order = order
+                    break
+            pct_threshold = -0.03  # Datový typ: float, jednotka: %
+            # Výpočet procentní rozdílu mezi posledním nákupním příkazem a aktuálním kurzem
+            pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price, current_price=current_rate)  # Datový typ: float, jednotka: %
+            # Kontrola, zda je procentní rozdíl menší než prahová hodnota
+            if pct_diff <= pct_threshold:
+                if last_buy_order and current_rate < last_buy_order.price:
+                    # Logování informací o obchodu
+                    logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                    # Získání celkové částky sázky v peněžence
+                    total_stake_amount = self.wallets.get_total_stake_amount()  # Datový typ: float
+                    # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
+                    calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount, decline=current_profit * 100, target_percent=1)  # Datový typ: float
+                    # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
+                    while calculated_dca_stake >= total_stake_amount:
+                        calculated_dca_stake = calculated_dca_stake / 4  # Datový typ: float
+                    # Logování informací o upravené sázce
+                    logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                    # Vrácení upravené velikosti sázky
+                    return calculated_dca_stake
+            # Vrácení None, pokud nejsou splněny podmínky pro upravení obchodní pozice
+            return None
