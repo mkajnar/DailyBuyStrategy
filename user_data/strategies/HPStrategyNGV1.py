@@ -1,19 +1,15 @@
 import datetime
-import json
 import logging
-import math
-import os
 from datetime import datetime
-from datetime import timedelta, timezone
 from functools import reduce
-from typing import Optional, List
+from typing import Optional
 
 import numpy as np
 import talib.abstract as ta
 from pandas import DataFrame
-from technical.indicators import ichimoku
+
 import freqtrade.vendor.qtpylib.indicators as qtpylib
-from freqtrade.persistence import Trade, LocalTrade, Order
+from freqtrade.persistence import Trade
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
@@ -52,16 +48,16 @@ class HPStrategyNGV1(IStrategy):
     maximum = 0.2
 
     trailing_stop = True
-    trailing_stop_positive = 0.001
-    trailing_stop_positive_offset = 0.005
+    trailing_stop_positive = 0.002
+    trailing_stop_positive_offset = 0.01
     trailing_only_offset_is_reached = True
     stoploss = -0.99
 
     minimal_roi = {
-        "0": 0.03,
-        "30": 0.02,
-        "60": 0.01,
-        "90": 0.005,
+        "0": 0.06,
+        "30": 0.03,
+        "60": 0.02,
+        "90": 0.01,
         "120": 0
     }
 
@@ -100,8 +96,7 @@ class HPStrategyNGV1(IStrategy):
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
 
     base_nb_candles_buy = IntParameter(8, 20, default=buy_params['base_nb_candles_buy'], space='buy', optimize=False)
-    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell',
-                                        optimize=False)
+    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell', optimize=False)
 
     @property
     def protections(self):
@@ -210,7 +205,6 @@ class HPStrategyNGV1(IStrategy):
         return informative_pairs
 
     def timeframe_to_minutes(self, timeframe):
-        """Převede timeframe na minuty."""
         if timeframe.endswith('m'):
             return int(timeframe[:-1])
         elif timeframe.endswith('h'):
@@ -235,8 +229,7 @@ class HPStrategyNGV1(IStrategy):
         dataframe['volume_mean_base'] = df36h['volume'].rolling(288).mean()
         dataframe['volume_change_percentage'] = (dataframe['volume_mean_long'] / dataframe['volume_mean_base'])
         dataframe['rsi_mean'] = dataframe['rsi'].rolling(48).mean()
-        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0),
-                                                -1, 0)
+        dataframe['pnd_volume_warn'] = np.where((dataframe['volume_mean_short'] / dataframe['volume_mean_long'] > 5.0), -1, 0)
         return dataframe
 
     def info_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -246,68 +239,51 @@ class HPStrategyNGV1(IStrategy):
         return dataframe
 
     def base_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['price_trend_long'] = (
-                dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
+        dataframe['price_trend_long'] = (dataframe['close'].rolling(8).mean() / dataframe['close'].shift(8).rolling(144).mean())
         ignore_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
         dataframe.rename(columns=lambda s: f"btc_{s}" if s not in ignore_columns else s, inplace=True)
         return dataframe
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-
         # RSI
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['rsi_fast'] = ta.RSI(dataframe, timeperiod=4)
         dataframe['rsi_slow'] = ta.RSI(dataframe, timeperiod=20)
-
         # SAR
         dataframe['sar'] = ta.SAR(dataframe, start=self.start, increment=self.increment, maximum=self.maximum)
         dataframe['sar_buy'] = (dataframe['sar'] < dataframe['low']).astype(int)
         dataframe['sar_sell'] = (dataframe['sar'] > dataframe['high']).astype(int)
-
         # EMA
         dataframe['ema_5'] = ta.EMA(dataframe, timeperiod=5)
         dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
         dataframe['ema_14'] = ta.EMA(dataframe, timeperiod=14)
-
         dataframe['ema_5'] = ta.EMA(dataframe['close'], timeperiod=5)
-
         condition = dataframe['ema_8'] > dataframe['ema_14']
+
         percentage_difference = 100 * (dataframe['ema_8'] - dataframe['ema_14']).abs() / dataframe['ema_14']
         dataframe['ema_pct_diff'] = percentage_difference.where(condition, -percentage_difference)
         dataframe['prev_ema_pct_diff'] = dataframe['ema_pct_diff'].shift(1)
 
-        crossover_up = (dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (
-                dataframe['ema_8'] > dataframe['ema_14'])
+        crossover_up = (dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (dataframe['ema_8'] > dataframe['ema_14'])
 
-        close_to_crossover_up = (dataframe['ema_8'] < dataframe['ema_14']) & (
-                dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (
-                                        dataframe['ema_8'] > dataframe['ema_8'].shift(1))
+        close_to_crossover_up = (dataframe['ema_8'] < dataframe['ema_14']) & (dataframe['ema_8'].shift(1) < dataframe['ema_14'].shift(1)) & (dataframe['ema_8'] > dataframe['ema_8'].shift(1))
 
-        ema_buy_signal = ((dataframe['ema_pct_diff'] < 0) & (dataframe['prev_ema_pct_diff'] < 0) & (
-                dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
+        ema_buy_signal = ((dataframe['ema_pct_diff'] < 0) & (dataframe['prev_ema_pct_diff'] < 0) & (dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
 
-        dataframe['ema_diff_buy_signal'] = ((ema_buy_signal | crossover_up | close_to_crossover_up)
-                                            & (dataframe['rsi'] <= 55) & (dataframe['volume'] > 0))
+        dataframe['ema_diff_buy_signal'] = ((ema_buy_signal | crossover_up | close_to_crossover_up) & (dataframe['rsi'] <= 55) & (dataframe['volume'] > 0))
 
-        dataframe['ema_diff_sell_signal'] = ((dataframe['ema_pct_diff'] > 0) &
-                                             (dataframe['prev_ema_pct_diff'] > 0) &
-                                             (dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
+        dataframe['ema_diff_sell_signal'] = ((dataframe['ema_pct_diff'] > 0) & (dataframe['prev_ema_pct_diff'] > 0) & (dataframe['ema_pct_diff'].abs() < dataframe['prev_ema_pct_diff'].abs()))
 
         dataframe = self.pump_dump_protection(dataframe, metadata)
 
         # HMA
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
 
-        # Vytvoření vah pro vážený průměr
-        weights = np.linspace(1, 0, 300)  # Váhy od 1 (nejnovější) do 0 (nejstarší)
-        weights /= weights.sum()  # Normalizace vah tak, aby jejich součet byl 1
+        weights = np.linspace(1, 0, 300)
+        weights /= weights.sum()
 
-        # Výpočet váženého průměru RSI pro posledních 300 svící
-        dataframe['weighted_rsi'] = dataframe['rsi'].rolling(window=300).apply(
-            lambda x: np.sum(weights * x[-300:]), raw=False
-        )
+        dataframe['weighted_rsi'] = dataframe['rsi'].rolling(window=300).apply(lambda x: np.sum(weights * x[-300:]), raw=False)
 
-        pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
         else:
@@ -345,12 +321,9 @@ class HPStrategyNGV1(IStrategy):
 
         # Přidání signálu 'jstkr'
         # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
-        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17)).astype(
-            int)
-        dataframe['jstkr_2'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.2) & (
-                dataframe['rsi'] <= 25)).astype('int')
-        dataframe['jstkr_3'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.04) & (
-                dataframe['rsi_fast'] <= 10)).astype('int')
+        dataframe['jstkr'] = ((dataframe['macd'] + dataframe['macdsignal'] < -0.01) & (dataframe['rsi'] <= 17)).astype(int)
+        dataframe['jstkr_2'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.2) & (dataframe['rsi'] <= 25)).astype('int')
+        dataframe['jstkr_3'] = ((abs(dataframe['macd'] - dataframe['macdsignal']) / dataframe['macd'].abs() > 0.04) & (dataframe['rsi_fast'] <= 10)).astype('int')
 
         # přidání výchozích buy/sell sloupců kvůli funkcionalitě ostatních metod
         if 'sell' not in dataframe.columns:
@@ -385,6 +358,12 @@ class HPStrategyNGV1(IStrategy):
         # result = ((Trade.get_open_trade_count() < self.trade_limit) and (cond_candles or cond_sar))
 
         # Příprava výsledku
+
+        logging.info(f"CTE {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}")
+
+        if 'force_entry' in entry_tag:
+            return True
+
         result = ((Trade.get_open_trade_count() < self.trade_limit)
                   & (last_candle['ema_diff_buy_signal'] == 1)
                   & (last_candle['sar_sell'] == 1))
@@ -393,6 +372,7 @@ class HPStrategyNGV1(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, sell_reason: str,
                            current_time: datetime, **kwargs) -> bool:
+
         sell_reason = f"{sell_reason}_" + trade.buy_tag
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
@@ -417,8 +397,7 @@ class HPStrategyNGV1(IStrategy):
             return True
         elif current_profit >= 0.0025:
             if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
-                logging.info(
-                    f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
+                logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
                 return True
             elif ema_8_current > ema_14_current and diff_current > diff_previous:
                 logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
