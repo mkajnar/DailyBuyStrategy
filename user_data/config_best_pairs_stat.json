@@ -1,0 +1,108 @@
+{
+    "max_open_trades": 200,
+    "amend_last_stake_amount": true,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 1,
+    "fiat_display_currency": "USD",
+    "timeframe": "5m",
+    "dry_run": true,
+    "dry_run_wallet": 1000,
+    "cancel_open_orders_on_exit": false,
+    "trading_mode": "spot",
+    "margin_mode": "",
+    "unfilledtimeout": {
+        "entry": 30,
+        "exit": 30,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    "exchange": {
+        "name": "kucoin",
+        "key": "",
+        "secret": "",
+        "password": "",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 60000,
+            "urls": {
+                "api": {
+                    "public": "http://proxy_bt:8080/kucoin",
+                    "private": "http://proxy_bt:8080/kucoin"
+                }
+            }
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 60000
+        },
+        "pair_whitelist":
+           ["ETH/USDT", "BTC/USDT", "SOL/USDT", "ADA/USDT", "AVAX/USDT",
+ "XRP/USDT", "DOGE/USDT", "LINK/USDT", "FTM/USDT", "MATIC/USDT",
+ "DOT/USDT", "ALGO/USDT", "INJ/USDT", "BNB/USDT", "ATOM/USDT",
+     "ICP/USDT", "VRA/USDT", "SHIB/USDT", "FLR/USDT", "KAS/USDT",
+ "LTC/USDT", "IMX/USDT", "ARB/USDT", "PYTH/USDT", "XMR/USDT",
+ "RUNE/USDT", "HBAR/USDT", "AGIX/USDT", "NEAR/USDT", "FET/USDT",
+ "DYDX/USDT", "TOMI/USDT", "RNDR/USDT", "SUI/USDT", "GALAX/USDT",
+ "EGLD/USDT", "FTT/USDT", "FIL/USDT", "XLM/USDT", "PYR/USDT",
+ "UNI/USDT", "NAKA/USDT", "TRX/USDT", "QNT/USDT", "AAVE/USDT",
+ "CRO/USDT", "APE/USDT", "APT/USDT", "BCH/USDT", "BLUR/USDT"],
+      "pair_blacklist": []
+    },
+    "_pairlists": [
+        {
+            "method": "VolumePairList",
+            "number_assets": 50,
+            "sort_key": "quoteVolume",
+            "min_value": 500000,
+            "refresh_period": 1800,
+            "lookback_timeframe": "1m"
+          },
+          {
+            "method": "PriceFilter",
+            "max_price": 10
+          }
+    ],
+    "pairlists": [
+        {
+            "method": "StaticPairList",
+            "number_assets": 100,
+            "sort_key": "quoteVolume",
+            "min_value": 0,
+            "refresh_period": 1800
+        }
+    ],
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "",
+        "ws_token": "",
+        "CORS_origins": [],
+        "username": "freqtrade",
+        "password": "freqtrade"
+    },
+    "bot_name": "freqtrade_1",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}
