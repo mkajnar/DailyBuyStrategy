@@ -46,48 +46,48 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
     }
 
     buy_params = {
+        "base_nb_candles_buy": 12,
         "buy_adx": 24,
         "buy_ema_cofi": 0.979,
         "buy_ewo_high": 9.793,
         "buy_fastd": 29,
         "buy_fastk": 30,
-        "distance_to_support_treshold": 0.041,
-        "rsi_buy": 36,
-        "base_nb_candles_buy": 12,  # value loaded from strategy
-        "candles_before": 37,  # value loaded from strategy
-        "candles_dca_multiplier": 56,  # value loaded from strategy
-        "dca_order_divider": 3,  # value loaded from strategy
-        "dca_wallet_divider": 5,  # value loaded from strategy
-        "ewo_high": 3.001,  # value loaded from strategy
-        "ewo_low": -10.289,  # value loaded from strategy
-        "lambo2_ema_14_factor": 0.981,  # value loaded from strategy
-        "lambo2_rsi_14_limit": 39,  # value loaded from strategy
-        "lambo2_rsi_4_limit": 44,  # value loaded from strategy
-        "low_offset": 0.987,  # value loaded from strategy
-        "max_safety_orders": 9,  # value loaded from strategy
-        "open_trade_limit": 5,  # value loaded from strategy
-        "pct_drop_treshold": 0.011,  # value loaded from strategy
-        "stoch_treshold": 25,  # value loaded from strategy
+        "candles_before": 37,
+        "candles_dca_multiplier": 56,
+        "dca_order_divider": 3,
+        "dca_wallet_divider": 5,
+        "ewo_high": 3.001,
+        "ewo_low": -10.289,
+        "lambo2_ema_14_factor": 0.981,
+        "lambo2_rsi_14_limit": 39,
+        "lambo2_rsi_4_limit": 44,
+        "low_offset": 0.987,
+        "max_safety_orders": 9,
+        "open_trade_limit": 5,
+        "pct_drop_treshold": 0.011,
+        "stoch_treshold": 25,
+        "distance_to_support_treshold": 0.043,
+        "rsi_buy": 57
     }
 
     # Sell hyperspace params:
     sell_params = {
-        "base_nb_candles_sell": 22,  # value loaded from strategy
-        "high_offset": 1.014,  # value loaded from strategy
-        "high_offset_2": 1.01,  # value loaded from strategy
+      "base_nb_candles_sell": 9,
+      "high_offset": 1.01,
+      "high_offset_2": 1.004
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-        "0": 0.12,
-        "30": 0.04,
-        "54": 0.017,
-        "135": 0
+      "0": 0.243,
+      "24": 0.061,
+      "42": 0.029,
+      "162": 0
     }
 
-    is_optimize_dca = False
+    is_optimize_dca = True
     is_optimize_sr = True
-    is_optimize_cofi = False
+    is_optimize_cofi = True
 
     stoch_treshold = IntParameter(20, 40, default=buy_params['stoch_treshold'], space='buy', optimize=False)
 
@@ -131,9 +131,9 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=False)
 
     trailing_stop = True
-    trailing_stop_positive = 0.003
-    trailing_stop_positive_offset = 0.01
-    trailing_only_offset_is_reached = True
+    trailing_stop_positive = 0.078
+    trailing_stop_positive_offset = 0.14400000000000002
+    trailing_only_offset_is_reached = False
 
     max_open_trades = 200
     amend_last_stake_amount = True
@@ -614,6 +614,12 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
 
         # Výpočet procentní změny mezi diff_current a diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
+
+        # Kontrola, zda je aktuální high vyšší než open poslední svíčky
+        last_candle = dataframe.iloc[-1]
+        if last_candle['high'] > last_candle['open']:
+            logging.info(f"CTE - Cena stále roste (high > open), HOLD")
+            return False
 
         if 'unclog' in sell_reason or 'force' in sell_reason:
             logging.info(f"CTE - FORCE or UNCLOG, EXIT")
