@@ -25,7 +25,6 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
     locked = []
     stoploss = -0.99
 
-    is_optimize_cofi = True
     use_sell_signal = True
     sell_profit_only = True
     ignore_roi_if_buy_signal = False
@@ -88,6 +87,7 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
 
     is_optimize_dca = False
     is_optimize_sr = True
+    is_optimize_cofi = False
 
     stoch_treshold = IntParameter(20, 40, default=buy_params['stoch_treshold'], space='buy', optimize=False)
 
@@ -149,8 +149,7 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
         'stoploss_on_exchange': False
     }
 
-    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell',
-                                        optimize=False)
+    base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell', optimize=True)
     high_offset = DecimalParameter(1.000, 1.010, default=sell_params['high_offset'], space='sell', optimize=True)
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
 
@@ -473,86 +472,89 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
 
     def populate_buy_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
-        conditions = []
+        mka_conditions = []
 
         fib_cond = (
                 (dataframe['close'] <= dataframe['fib_618']) &
                 (dataframe['close'] >= dataframe['fib_618'] * 0.99)
         )
         dataframe.loc[fib_cond, 'buy_tag'] += 'fib_0618_'
-        conditions.append(fib_cond)
+        mka_conditions.append(fib_cond)
 
-        # stochastic_cond = (
-        #         (dataframe['stoch_k'] <= self.stoch_treshold.value) &
-        #         (dataframe['stoch_d'] <= self.stoch_treshold.value) &
-        #         (dataframe['stoch_k'] > dataframe['stoch_d'])
-        # )
-        # dataframe.loc[stochastic_cond, 'buy_tag'] += 'stoch_kd_'
-        # conditions.append(stochastic_cond)
-        #
-        # lambo2 = (
-        #     # bool(self.lambo2_enabled.value) &
-        #     # (dataframe['pump_warning'] == 0) &
-        #         (dataframe['close'] < (dataframe['ema_14'] * self.lambo2_ema_14_factor.value)) &
-        #         (dataframe['rsi_4'] < int(self.lambo2_rsi_4_limit.value)) &
-        #         (dataframe['rsi_14'] < int(self.lambo2_rsi_14_limit.value))
-        # )
-        # dataframe.loc[lambo2, 'buy_tag'] += 'lambo2_'
-        # conditions.append(lambo2)
-        #
-        # buy1ewo = (
-        #         (dataframe['rsi_fast'] < 35) &
-        #         (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
-        #         (dataframe['EWO'] > self.ewo_high.value) &
-        #         (dataframe['rsi'] < self.rsi_buy.value) &
-        #         (dataframe['volume'] > 0) &
-        #         (dataframe['close'] < (
-        #                 dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
-        # )
-        # dataframe.loc[buy1ewo, 'buy_tag'] += 'buy1eworsi_'
-        # conditions.append(buy1ewo)
-        #
-        # buy2ewo = (
-        #         (dataframe['rsi_fast'] < 35) &
-        #         (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
-        #         (dataframe['EWO'] < self.ewo_low.value) &
-        #         (dataframe['volume'] > 0) &
-        #         (dataframe['close'] < (
-        #                 dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
-        # )
-        # dataframe.loc[buy2ewo, 'buy_tag'] += 'buy2ewo_'
-        # conditions.append(buy2ewo)
-        #
-        # is_cofi = (
-        #         (dataframe['open'] < dataframe['ema_8'] * self.buy_ema_cofi.value) &
-        #         (qtpylib.crossed_above(dataframe['fastk'], dataframe['fastd'])) &
-        #         (dataframe['fastk'] < self.buy_fastk.value) &
-        #         (dataframe['fastd'] < self.buy_fastd.value) &
-        #         (dataframe['adx'] > self.buy_adx.value) &
-        #         (dataframe['EWO'] > self.buy_ewo_high.value)
-        # )
-        # dataframe.loc[is_cofi, 'buy_tag'] += 'cofi_'
-        # conditions.append(is_cofi)
+        conditions = []
+        stochastic_cond = (
+                (dataframe['stoch_k'] <= self.stoch_treshold.value) &
+                (dataframe['stoch_d'] <= self.stoch_treshold.value) &
+                (dataframe['stoch_k'] > dataframe['stoch_d'])
+        )
+        dataframe.loc[stochastic_cond, 'buy_tag'] += 'stoch_kd_'
+        conditions.append(stochastic_cond)
+
+        lambo2 = (
+            # bool(self.lambo2_enabled.value) &
+            # (dataframe['pump_warning'] == 0) &
+                (dataframe['close'] < (dataframe['ema_14'] * self.lambo2_ema_14_factor.value)) &
+                (dataframe['rsi_4'] < int(self.lambo2_rsi_4_limit.value)) &
+                (dataframe['rsi_14'] < int(self.lambo2_rsi_14_limit.value))
+        )
+        dataframe.loc[lambo2, 'buy_tag'] += 'lambo2_'
+        conditions.append(lambo2)
+
+        buy1ewo = (
+                (dataframe['rsi_fast'] < 35) &
+                (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
+                (dataframe['EWO'] > self.ewo_high.value) &
+                (dataframe['rsi'] < self.rsi_buy.value) &
+                (dataframe['volume'] > 0) &
+                (dataframe['close'] < (
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+        )
+        dataframe.loc[buy1ewo, 'buy_tag'] += 'buy1eworsi_'
+        conditions.append(buy1ewo)
+
+        buy2ewo = (
+                (dataframe['rsi_fast'] < 35) &
+                (dataframe['close'] < (dataframe[f'ma_buy_{self.base_nb_candles_buy.value}'] * self.low_offset.value)) &
+                (dataframe['EWO'] < self.ewo_low.value) &
+                (dataframe['volume'] > 0) &
+                (dataframe['close'] < (
+                        dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
+        )
+        dataframe.loc[buy2ewo, 'buy_tag'] += 'buy2ewo_'
+        conditions.append(buy2ewo)
+
+        is_cofi = (
+                (dataframe['open'] < dataframe['ema_8'] * self.buy_ema_cofi.value) &
+                (qtpylib.crossed_above(dataframe['fastk'], dataframe['fastd'])) &
+                (dataframe['fastk'] < self.buy_fastk.value) &
+                (dataframe['fastd'] < self.buy_fastd.value) &
+                (dataframe['adx'] > self.buy_adx.value) &
+                (dataframe['EWO'] > self.buy_ewo_high.value)
+        )
+        dataframe.loc[is_cofi, 'buy_tag'] += 'cofi_'
+        conditions.append(is_cofi)
 
         # """ Přidání potvrzení nákupního signálu """
         cond_sar = self.confirm_by_sar(dataframe)
-        # cond_candles = self.confirm_by_candles(dataframe)
+        cond_candles = self.confirm_by_candles(dataframe)
         dataframe.loc[cond_sar, 'buy_tag'] += 'sar_'
-        # dataframe.loc[cond_candles, 'buy_tag'] += 'candles_'
-        conditions.append(cond_sar)
-        # conditions.append(cond_candles)
+        dataframe.loc[cond_candles, 'buy_tag'] += 'candles_'
+        mka_conditions.append(cond_sar)
+        mka_conditions.append(cond_candles)
 
-        if conditions:
-            final_condition = reduce(lambda x, y: x & y, conditions)
+        if mka_conditions:
+            final_condition_mka = reduce(lambda x, y: x & y, mka_conditions)
+            final_condition_orig = reduce(lambda x, y: x | y, conditions)
+            final_condition = reduce(lambda x, y: x | y, [final_condition_mka, final_condition_orig])
             dataframe.loc[final_condition, 'buy'] = 1
 
-        dont_buy_conditions = [
-            dataframe['pnd_volume_warn'] < 0.0,
-            dataframe['btc_rsi_8_1h'] < 35.0
-        ]
-
-        for condition in dont_buy_conditions:
-            dataframe.loc[condition, 'buy'] = 0
+        # dont_buy_conditions = [
+        #     dataframe['pnd_volume_warn'] < 0.0,
+        #     dataframe['btc_rsi_8_1h'] < 35.0
+        # ]
+        #
+        # for condition in dont_buy_conditions:
+        #     dataframe.loc[condition, 'buy'] = 0
 
         return dataframe
 
