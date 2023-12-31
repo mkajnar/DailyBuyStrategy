@@ -583,7 +583,8 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
         # cond_candles = self.confirm_by_candles(last_candle)
         # cond_sar = self.confirm_by_sar(last_candle)
 
-        # Příprava výsledku
+        if 'force' in entry_tag:
+            return True
         result = (Trade.get_open_trade_count() < self.open_trade_limit.value)
         # and (cond_candles or cond_sar)
         return result
@@ -615,16 +616,17 @@ class HPStrategyTFJPAConfirmV1(IStrategy):
         # Výpočet procentní změny mezi diff_current a diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
+        if 'unclog' in sell_reason or 'force' in sell_reason:
+            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
+            return True
+
         # Kontrola, zda je aktuální high vyšší než open poslední svíčky
         last_candle = dataframe.iloc[-1]
         if last_candle['high'] > last_candle['open']:
             logging.info(f"CTE - Cena stále roste (high > open), HOLD")
             return False
 
-        if 'unclog' in sell_reason or 'force' in sell_reason:
-            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
-            return True
-        elif current_profit >= 0.0025:
+        if current_profit >= 0.0025:
             if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
                 logging.info(
                     f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
