@@ -584,6 +584,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # cond_sar = self.confirm_by_sar(last_candle)
 
         # Příprava výsledku
+        if 'force' in entry_tag:
+            return True
         result = (Trade.get_open_trade_count() < self.open_trade_limit.value)
         # and (cond_candles or cond_sar)
         return result
