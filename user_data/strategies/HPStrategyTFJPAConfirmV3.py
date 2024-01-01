@@ -73,17 +73,17 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     # Sell hyperspace params:
     sell_params = {
-      "base_nb_candles_sell": 9,
-      "high_offset": 1.01,
-      "high_offset_2": 1.004
+        "base_nb_candles_sell": 9,
+        "high_offset": 1.01,
+        "high_offset_2": 1.004
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-      "0": 0.243,
-      "24": 0.061,
-      "42": 0.029,
-      "162": 0
+        "0": 0.243,
+        "24": 0.061,
+        "42": 0.029,
+        "162": 0
     }
 
     is_optimize_dca = True
@@ -265,16 +265,6 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         return informative_pairs
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Přidání nových sloupců kvůli funkcionalitě ostatních metod
-        # if 'sell' not in dataframe.columns:
-        #     dataframe.loc[:, 'sell'] = 0
-        # if 'sell_tag' not in dataframe.columns:
-        #     dataframe.loc[:, 'sell_tag'] = ''
-        # if 'buy' not in dataframe.columns:
-        #     dataframe.loc[:, 'buy'] = 0
-        # if 'buy_tag' not in dataframe.columns:
-        #     dataframe.loc[:, 'buy_tag'] = ''
-
         dataframe['price_history'] = dataframe['close'].shift(1)
         low_min = dataframe['low'].rolling(window=14).min()
         high_max = dataframe['high'].rolling(window=14).max()
@@ -475,7 +465,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
-        
+
         fib_cond = (
                 (dataframe['close'] <= dataframe['fib_618']) &
                 (dataframe['close'] >= dataframe['fib_618'] * 0.99)
@@ -556,7 +546,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # ]
         #
         # for condition in dont_buy_conditions:
-        #     dataframe.loc[condition, 'buy'] = 0
+        #     dataframe.loc[condition, 'enter_long'] = 0
+        
+
+        dataframe.loc[:, 'enter_short'] = 0
 
         dataframe.loc[:, 'enter_short'] = 0
 
@@ -578,21 +571,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
-        # """ Získání dat pro potvrzení nákupního signálu """
-        # try:
-        #     dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        #     df = dataframe.copy()
-        # except Exception as e:
-        #     logging.error(f"Error getting analyzed dataframe: {e}")
-        #     return False
-        #
-        # # Získání aktuální svíčky
-        # last_candle = df.iloc[-1].squeeze()
-        # # Podmínky pro potvrzení nákupního signálu
-        # cond_candles = self.confirm_by_candles(last_candle)
-        # cond_sar = self.confirm_by_sar(last_candle)
-
+        
         # Příprava výsledku
+        if 'force' in entry_tag:
+            return True
         result = (Trade.get_open_trade_count() < self.open_trade_limit.value)
         # and (cond_candles or cond_sar)
         return result
@@ -624,16 +606,17 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # Výpočet procentní změny mezi diff_current a diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
+        if 'unclog' in exit_reason or 'force' in exit_reason:
+            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
+            return True
+
         # Kontrola, zda je aktuální high vyšší než open poslední svíčky
         last_candle = dataframe.iloc[-1]
         if last_candle['high'] > last_candle['open']:
             logging.info(f"CTE - Cena stále roste (high > open), HOLD")
             return False
 
-        if 'unclog' in exit_reason or 'force' in exit_reason:
-            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
-            return True
-        elif current_profit >= 0.0025:
+        if current_profit >= 0.0025:
             if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
                 logging.info(
                     f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
