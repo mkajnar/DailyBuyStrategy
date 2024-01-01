@@ -16,6 +16,7 @@ from freqtrade.strategy.interface import IStrategy
 
 class HPStrategyTFJPAConfirmV3(IStrategy):
     INTERFACE_VERSION = 3
+    can_short = False
     support_dict = {}
     resistance_dict = {}
     lowest_prices = {}
@@ -72,17 +73,17 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     # Sell hyperspace params:
     sell_params = {
-      "base_nb_candles_sell": 9,
-      "high_offset": 1.01,
-      "high_offset_2": 1.004
+        "base_nb_candles_sell": 9,
+        "high_offset": 1.01,
+        "high_offset_2": 1.004
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-      "0": 0.243,
-      "24": 0.061,
-      "42": 0.029,
-      "162": 0
+        "0": 0.243,
+        "24": 0.061,
+        "42": 0.029,
+        "162": 0
     }
 
     is_optimize_dca = True
@@ -265,14 +266,14 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Přidání nových sloupců kvůli funkcionalitě ostatních metod
-        if 'sell' not in dataframe.columns:
-            dataframe.loc[:, 'sell'] = 0
-        if 'sell_tag' not in dataframe.columns:
-            dataframe.loc[:, 'sell_tag'] = ''
-        if 'buy' not in dataframe.columns:
-            dataframe.loc[:, 'buy'] = 0
-        if 'buy_tag' not in dataframe.columns:
-            dataframe.loc[:, 'buy_tag'] = ''
+        # if 'sell' not in dataframe.columns:
+        #     dataframe.loc[:, 'sell'] = 0
+        # if 'sell_tag' not in dataframe.columns:
+        #     dataframe.loc[:, 'sell_tag'] = ''
+        # if 'buy' not in dataframe.columns:
+        #     dataframe.loc[:, 'buy'] = 0
+        # if 'buy_tag' not in dataframe.columns:
+        #     dataframe.loc[:, 'buy_tag'] = ''
 
         dataframe['price_history'] = dataframe['close'].shift(1)
         low_min = dataframe['low'].rolling(window=14).min()
@@ -473,12 +474,13 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         mka_conditions = []
+        dataframe.loc[:, 'enter_tag'] = ''
 
         fib_cond = (
                 (dataframe['close'] <= dataframe['fib_618']) &
                 (dataframe['close'] >= dataframe['fib_618'] * 0.99)
         )
-        dataframe.loc[fib_cond, 'buy_tag'] += 'fib_0618_'
+        dataframe.loc[fib_cond, 'enter_tag'] += 'fib_0618_'
         mka_conditions.append(fib_cond)
 
         conditions = []
@@ -487,7 +489,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                 (dataframe['stoch_d'] <= self.stoch_treshold.value) &
                 (dataframe['stoch_k'] > dataframe['stoch_d'])
         )
-        dataframe.loc[stochastic_cond, 'buy_tag'] += 'stoch_kd_'
+        dataframe.loc[stochastic_cond, 'enter_tag'] += 'stoch_kd_'
         conditions.append(stochastic_cond)
 
         lambo2 = (
@@ -497,7 +499,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                 (dataframe['rsi_4'] < int(self.lambo2_rsi_4_limit.value)) &
                 (dataframe['rsi_14'] < int(self.lambo2_rsi_14_limit.value))
         )
-        dataframe.loc[lambo2, 'buy_tag'] += 'lambo2_'
+        dataframe.loc[lambo2, 'enter_tag'] += 'lambo2_'
         conditions.append(lambo2)
 
         buy1ewo = (
@@ -509,7 +511,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                 (dataframe['close'] < (
                         dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
-        dataframe.loc[buy1ewo, 'buy_tag'] += 'buy1eworsi_'
+        dataframe.loc[buy1ewo, 'enter_tag'] += 'buy1eworsi_'
         conditions.append(buy1ewo)
 
         buy2ewo = (
@@ -520,7 +522,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                 (dataframe['close'] < (
                         dataframe[f'ma_sell_{self.base_nb_candles_sell.value}'] * self.high_offset.value))
         )
-        dataframe.loc[buy2ewo, 'buy_tag'] += 'buy2ewo_'
+        dataframe.loc[buy2ewo, 'enter_tag'] += 'buy2ewo_'
         conditions.append(buy2ewo)
 
         is_cofi = (
@@ -531,14 +533,14 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                 (dataframe['adx'] > self.buy_adx.value) &
                 (dataframe['EWO'] > self.buy_ewo_high.value)
         )
-        dataframe.loc[is_cofi, 'buy_tag'] += 'cofi_'
+        dataframe.loc[is_cofi, 'enter_tag'] += 'cofi_'
         conditions.append(is_cofi)
 
         # """ Přidání potvrzení nákupního signálu """
         cond_sar = self.confirm_by_sar(dataframe)
         cond_candles = self.confirm_by_candles(dataframe)
-        dataframe.loc[cond_sar, 'buy_tag'] += 'sar_'
-        dataframe.loc[cond_candles, 'buy_tag'] += 'candles_'
+        dataframe.loc[cond_sar, 'enter_tag'] += 'sar_'
+        dataframe.loc[cond_candles, 'enter_tag'] += 'candles_'
         mka_conditions.append(cond_sar)
         mka_conditions.append(cond_candles)
 
@@ -546,7 +548,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
             final_condition_mka = reduce(lambda x, y: x & y, mka_conditions)
             final_condition_orig = reduce(lambda x, y: x | y, conditions)
             final_condition = reduce(lambda x, y: x | y, [final_condition_mka, final_condition_orig])
-            dataframe.loc[final_condition, 'buy'] = 1
+            dataframe.loc[final_condition, 'enter_long'] = 1
 
         # dont_buy_conditions = [
         #     dataframe['pnd_volume_warn'] < 0.0,
@@ -554,16 +556,24 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # ]
         #
         # for condition in dont_buy_conditions:
-        #     dataframe.loc[condition, 'buy'] = 0
+        #     dataframe.loc[condition, 'enter_long'] = 0
+        
+
+        dataframe.loc[:, 'enter_short'] = 0
 
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
+        dataframe.loc[:, 'exit_tag'] = ''
+
         dataframe.loc[
             (
                 (dataframe['close'] > dataframe['fib_618'])
             ),
-            'sell'] = 1
+            'exit_long'] = 1
+
+        dataframe.loc[:, 'exit_short'] = 0
         return dataframe
 
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
@@ -596,9 +606,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
             return 'unclog'
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
-                           rate: float, time_in_force: str, sell_reason: str,
+                           rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        sell_reason = f"{sell_reason}_" + trade.buy_tag
+        exit_reason = f"{exit_reason}_{trade.enter_tag}"
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
 
@@ -617,7 +627,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # Výpočet procentní změny mezi diff_current a diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
-        if 'unclog' in sell_reason or 'force' in sell_reason:
+        if 'unclog' in exit_reason or 'force' in exit_reason:
             logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
 
