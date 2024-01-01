@@ -47,28 +47,28 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     }
 
     buy_params = {
-        "base_nb_candles_buy": 12,
-        "buy_adx": 24,
-        "buy_ema_cofi": 0.979,
-        "buy_ewo_high": 9.793,
-        "buy_fastd": 29,
-        "buy_fastk": 30,
-        "candles_before": 37,
-        "candles_dca_multiplier": 56,
-        "dca_order_divider": 3,
-        "dca_wallet_divider": 5,
-        "ewo_high": 3.001,
-        "ewo_low": -10.289,
-        "lambo2_ema_14_factor": 0.981,
-        "lambo2_rsi_14_limit": 39,
-        "lambo2_rsi_4_limit": 44,
-        "low_offset": 0.987,
-        "max_safety_orders": 9,
-        "open_trade_limit": 5,
+        "buy_adx": 30,
+        "buy_ema_cofi": 0.961,
+        "buy_ewo_high": 11.945,
+        "buy_fastd": 25,
+        "buy_fastk": 20,
+        "candles_before": 159,
+        "candles_dca_multiplier": 57,
+        "dca_order_divider": 7,
+        "dca_wallet_divider": 4,
+        "distance_to_support_treshold": 0.018,
+        "max_safety_orders": 6,
         "pct_drop_treshold": 0.011,
-        "stoch_treshold": 25,
-        "distance_to_support_treshold": 0.043,
-        "rsi_buy": 57
+        "rsi_buy": 61,
+        "base_nb_candles_buy": 12,  # value loaded from strategy
+        "ewo_high": 3.001,  # value loaded from strategy
+        "ewo_low": -10.289,  # value loaded from strategy
+        "lambo2_ema_14_factor": 0.981,  # value loaded from strategy
+        "lambo2_rsi_14_limit": 39,  # value loaded from strategy
+        "lambo2_rsi_4_limit": 44,  # value loaded from strategy
+        "low_offset": 0.987,  # value loaded from strategy
+        "open_trade_limit": 5,  # value loaded from strategy
+        "stoch_treshold": 25,  # value loaded from strategy
     }
 
     # Sell hyperspace params:
@@ -136,7 +136,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     trailing_stop_positive_offset = 0.14400000000000002
     trailing_only_offset_is_reached = False
 
-    max_open_trades = 200
+    max_open_trades = 35
     amend_last_stake_amount = True
 
     start = 0.02
@@ -557,7 +557,6 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         #
         # for condition in dont_buy_conditions:
         #     dataframe.loc[condition, 'enter_long'] = 0
-        
 
         dataframe.loc[:, 'enter_short'] = 0
 
