@@ -1,0 +1,55 @@
+{
+  "strategy_name": "HPStrategyTFJPAConfirmV3",
+  "params": {
+    "stoploss": {
+      "stoploss": -0.99
+    },
+    "max_open_trades": {
+      "max_open_trades": 25
+    },
+    "buy": {
+      "base_nb_candles_buy": 12,
+      "ewo_high": 3.001,
+      "ewo_low": -10.289,
+      "lambo2_ema_14_factor": 0.981,
+      "lambo2_rsi_14_limit": 39,
+      "lambo2_rsi_4_limit": 44,
+      "low_offset": 0.987,
+      "open_trade_limit": 5,
+      "stoch_treshold": 25,
+      "buy_adx": 30,
+      "buy_ema_cofi": 0.96,
+      "buy_ewo_high": 2.934,
+      "buy_fastd": 22,
+      "buy_fastk": 22,
+      "candles_before": 10,
+      "candles_dca_multiplier": 3,
+      "dca_order_divider": 4,
+      "dca_wallet_divider": 10,
+      "distance_to_support_treshold": 0.026,
+      "max_safety_orders": 7,
+      "pct_drop_treshold": 0.014,
+      "rsi_buy": 37
+    },
+    "sell": {
+      "base_nb_candles_sell": 18,
+      "high_offset": 1.003,
+      "high_offset_2": 1.007
+    },
+    "protection": {},
+    "roi": {
+      "0": 0.051000000000000004,
+      "24": 0.026000000000000002,
+      "40": 0.014,
+      "63": 0
+    },
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.289,
+      "trailing_stop_positive_offset": 0.307,
+      "trailing_only_offset_is_reached": false
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2024-01-03 01:30:27.495597+00:00"
+}
