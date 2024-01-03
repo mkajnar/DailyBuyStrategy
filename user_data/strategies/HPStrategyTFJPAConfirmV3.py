@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 from datetime import datetime
 from functools import reduce
 from typing import Optional
@@ -158,6 +160,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     high_offset = DecimalParameter(1.000, 1.010, default=sell_params['high_offset'], space='sell', optimize=True)
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
 
+
     @property
     def protections(self):
         return [
@@ -197,6 +200,26 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     def version(self) -> str:
         return f"{super().version()} TFJPAConfirmV3 "
+
+    def create_static_config(self):
+        try:
+            # Načtení aktuální konfigurace
+            cf = self.config['config_files'][0]
+            cfnew = cf.replace('.json', '_static.json')
+            if not os.path.exists(cfnew):
+                current_config = json.loads(open(cf, 'r').read())
+                # Získání whitelistu měn (příklad, přizpůsobte dle vaší strategie)
+                current_whitelist = self.dp.current_whitelist()
+                # Nahrazení whitelistu v konfiguraci statickým seznamem
+                current_config['exchange']['pair_whitelist'] = current_whitelist
+                stp = [{"method": "StaticPairList", "number_assets": len(current_whitelist)}]
+                current_config['pairlists'] = stp
+                current_config['timeframe'] = self.timeframe
+                # Uložení upravené konfigurace do souboru
+                with open(cfnew, 'w') as config_file:
+                    json.dump(current_config, config_file, indent=4)
+        except Exception as e:
+            print(e)
 
     def pivot_points(self, high, low, period=10):
         pivot_high = high.rolling(window=2 * period + 1, center=True).max()
@@ -306,15 +329,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         return result
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Přidání nových sloupců kvůli funkcionalitě ostatních metod
-        # if 'sell' not in dataframe.columns:
-        #     dataframe.loc[:, 'sell'] = 0
-        # if 'sell_tag' not in dataframe.columns:
-        #     dataframe.loc[:, 'sell_tag'] = ''
-        # if 'buy' not in dataframe.columns:
-        #     dataframe.loc[:, 'buy'] = 0
-        # if 'buy_tag' not in dataframe.columns:
-        #     dataframe.loc[:, 'buy_tag'] = ''
+
+        self.create_static_config()
 
         # Výpočet DOJI
         try:
@@ -994,7 +1010,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
                             if last_candle['five_min'] == 0:
                                 return None
-                            
+
                             if pct_diff <= -self.pct_drop_treshold.value:
                                 if last_buy_order and current_rate < last_buy_order.price:
                                     # Kontrola RSI podmínky pro DCA
