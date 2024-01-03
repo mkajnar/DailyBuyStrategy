@@ -53,19 +53,19 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     # jstrk_adjust = True
 
     buy_params = {
-        "buy_adx": 30,
-        "buy_ema_cofi": 0.96,
-        "buy_ewo_high": 2.934,
-        "buy_fastd": 22,
-        "buy_fastk": 22,
-        "candles_before": 10,
-        "candles_dca_multiplier": 3,
-        "dca_order_divider": 4,
-        "dca_wallet_divider": 10,
-        "distance_to_support_treshold": 0.026,
-        "max_safety_orders": 7,
-        "pct_drop_treshold": 0.014,
-        "rsi_buy": 37,
+        "buy_adx": 21,
+        "buy_ema_cofi": 0.962,
+        "buy_ewo_high": 4.568,
+        "buy_fastd": 21,
+        "buy_fastk": 20,
+        "candles_before": 20,
+        "candles_dca_multiplier": 7,
+        "dca_order_divider": 6,
+        "dca_wallet_divider": 4,
+        "distance_to_support_treshold": 0.043,
+        "max_safety_orders": 3,
+        "pct_drop_treshold": 0.013,
+        "rsi_buy": 69,
         "base_nb_candles_buy": 12,  # value loaded from strategy
         "ewo_high": 3.001,  # value loaded from strategy
         "ewo_low": -10.289,  # value loaded from strategy
@@ -79,17 +79,17 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     # Sell hyperspace params:
     sell_params = {
-        "base_nb_candles_sell": 18,
-        "high_offset": 1.003,
-        "high_offset_2": 1.007,
+        "base_nb_candles_sell": 13,  # value loaded from strategy
+        "high_offset": 1.002,  # value loaded from strategy
+        "high_offset_2": 1.0,  # value loaded from strategy
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-        "0": 0.051,
-        "24": 0.026,
-        "40": 0.014,
-        "63": 0
+        "0": 0.109,
+        "17": 0.035,
+        "51": 0.011,
+        "104": 0
     }
 
     is_optimize_dca = True
@@ -138,9 +138,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=False)
 
     trailing_stop = True
-    trailing_stop_positive = 0.289
-    trailing_stop_positive_offset = 0.307
-    trailing_only_offset_is_reached = False
+    trailing_stop_positive = 0.206
+    trailing_stop_positive_offset = 0.278
+    trailing_only_offset_is_reached = True
 
     max_open_trades = 25
     amend_last_stake_amount = True
