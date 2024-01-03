@@ -4,6 +4,8 @@ from functools import reduce
 from typing import Optional
 
 import numpy as np
+import pandas as pd
+import talib
 import talib.abstract as ta
 from pandas import DataFrame
 from technical.indicators import ichimoku
@@ -314,6 +316,47 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # if 'buy_tag' not in dataframe.columns:
         #     dataframe.loc[:, 'buy_tag'] = ''
 
+        # Výpočet DOJI
+        try:
+            open = dataframe['open']
+            high = dataframe['high']
+            low = dataframe['low']
+            close = dataframe['close']
+            # TA-LIB Doji Scanner
+            doji = talib.CDLDOJI(open, high, low, close)
+            doji_star = talib.CDLDRAGONFLYDOJI(open, high, low, close)
+            # Create a Doji Column, replace Doji points with with an candle close price
+            dataframe['doji'] = doji
+            dataframe['doji'] = np.where(dataframe['doji'] > 0, close, 0)
+            dataframe['doji_star'] = doji_star
+            dataframe['doji_star'] = np.where(dataframe['doji_star'] > 0, close, 0)
+            # Create new Complete_Doji column, merges both columns together and finds maximas
+            dataframe['complete_doji'] = np.where(dataframe['doji'] > 0, dataframe['doji'], dataframe['doji_star'])
+            complete_doji = dataframe['complete_doji']
+            dataframe['complete_doji_idx'] = np.where(dataframe['complete_doji'] > 0, complete_doji.index, 0)
+            # TA-LIB Trend line scanner
+            trend_line = talib.HT_TRENDLINE(close)
+            # Replace first 63 rows, 'NaN' values with 0s, create a new Trendline Column
+            trend_line.fillna(0, inplace=True)
+            dataframe['trend_line'] = trend_line
+            # TA-LIB RSI Scanner
+            rsi = talib.RSI(close, timeperiod=7)
+            # Fill 'NaN' values with 0s
+            dataframe['rsi'] = rsi.fillna(0)
+            # Create new columns for RSI70 and RSI30 and fill with rsi values if Above/Below
+            dataframe['rsi70'] = np.where(dataframe['rsi'] >= 70, rsi, 0)
+            dataframe['rsi30'] = np.where(dataframe['rsi'] <= 30, rsi, 0)
+            # Create Above/Below trend columns and insert Doji prices if Above/Below trend line
+            dataframe['above_trend'] = np.where(dataframe['complete_doji'] > dataframe['trend_line'], dataframe.complete_doji, 0)
+            dataframe['below_trend'] = np.where(dataframe['complete_doji'] < dataframe['trend_line'], dataframe.complete_doji, 0)
+            dataframe['five_max'] = np.where(dataframe['above_trend'] > 0, 1, 0)
+            dataframe['five_min'] = np.where(dataframe['below_trend'] > 0, 1, 0)
+            dataframe.merge(dataframe, on='date')
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+            pass
+
+        # Výpočet Stochastic
         dataframe['price_history'] = dataframe['close'].shift(1)
         low_min = dataframe['low'].rolling(window=14).min()
         high_max = dataframe['high'].rolling(window=14).max()
@@ -380,6 +423,26 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
         dataframe['ema_21'] = ta.EMA(dataframe, timeperiod=21)
         dataframe['ema_50'] = ta.EMA(dataframe, timeperiod=50)
+
+        # ADX
+        dataframe['adx'] = ta.ADX(dataframe)
+
+        # Plus Directional Indicator / Movement
+        dataframe['plus_dm'] = ta.PLUS_DM(dataframe)
+        dataframe['plus_di'] = ta.PLUS_DI(dataframe)
+
+        # # Minus Directional Indicator / Movement
+        dataframe['minus_dm'] = ta.MINUS_DM(dataframe)
+        dataframe['minus_di'] = ta.MINUS_DI(dataframe)
+
+        # Aroon, Aroon Oscillator
+        aroon = ta.AROON(dataframe)
+        dataframe['aroonup'] = aroon['aroonup']
+        dataframe['aroondown'] = aroon['aroondown']
+        dataframe['aroonosc'] = ta.AROONOSC(dataframe)
+
+        # Awesome Oscillator
+        dataframe['ao'] = qtpylib.awesome_oscillator(dataframe)
 
         condition = dataframe['ema_8'] > dataframe['ema_14']
         percentage_difference = 100 * (dataframe['ema_8'] - dataframe['ema_14']).abs() / dataframe['ema_14']
@@ -725,6 +788,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         for condition in dont_buy_conditions:
             dataframe.loc[condition, 'enter_long'] = 0
 
+        dataframe.loc[(dataframe['five_min'] == 1), 'enter_long'] = 1
+        dataframe.loc[(dataframe['five_min'] == 1), 'enter_tag'] = 'five_min'
+
         dataframe.loc[:, 'enter_short'] = 0
 
         return dataframe
@@ -739,6 +805,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                     (dataframe['sma_50'].shift(1) > dataframe['sma_50'])
             ),
             'exit_long'] = 1
+
+        dataframe.loc[(dataframe['five_max'] == 1), 'exit_long'] = 1
+        dataframe.loc[(dataframe['five_max'] == 1), 'exit_tag'] = 'five_max'
 
         dataframe.loc[:, 'exit_short'] = 0
         return dataframe
@@ -922,6 +991,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                             pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
                                                                             current_price=current_rate)  # Datový typ: float, jednotka: %
                             # Kontrola, zda je procentní rozdíl menší než prahová hodnota
+
+                            if last_candle['five_min'] == 0:
+                                return None
+                            
                             if pct_diff <= -self.pct_drop_treshold.value:
                                 if last_buy_order and current_rate < last_buy_order.price:
                                     # Kontrola RSI podmínky pro DCA
@@ -974,6 +1047,46 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
             return int(timeframe[:-1]) * 1440
         else:
             raise ValueError("Neznámý timeframe: {}".format(timeframe))
+
+    def prepare_doji(self, df):
+        df = df.set_index(df.date)
+        df = df.drop_duplicates(keep=False)
+        df['date'] = pd.to_datetime(df['date']).tolist()
+        df = df.iloc[:200]
+        open = df['open']
+        high = df['high']
+        low = df['low']
+        close = df['close']
+        # TA-LIB Doji Scanner
+        doji = talib.CDLDOJI(open, high, low, close)
+        doji_star = talib.CDLDRAGONFLYDOJI(open, high, low, close)
+        # Create a Doji Column, replace Doji points with with an candle close price
+        df['doji'] = doji
+        df['doji'] = np.where(df['doji'] > 0, close, 0)
+        df['doji_star'] = doji_star
+        df['doji_star'] = np.where(df['doji_star'] > 0, close, 0)
+        # Create new Complete_Doji column, merges both columns together and finds maximas
+        df['complete_doji'] = np.where(df['doji'] > 0, df['doji'], df['doji_star'])
+        complete_doji = df['complete_doji']
+        df['complete_doji_idx'] = np.where(df['complete_doji'] > 0, complete_doji.index, 0)
+        # TA-LIB Trend line scanner
+        trend_line = talib.HT_TRENDLINE(close)
+        # Replace first 63 rows, 'NaN' values with 0s, create a new Trendline Column
+        trend_line.fillna(0, inplace=True)
+        df['trend_line'] = trend_line
+        # TA-LIB RSI Scanner
+        rsi = talib.RSI(close, timeperiod=7)
+        # Fill 'NaN' values with 0s
+        df['rsi'] = rsi.fillna(0)
+        # Create new columns for RSI70 and RSI30 and fill with rsi values if Above/Below
+        df['rsi70'] = np.where(df['rsi'] >= 70, rsi, 0)
+        df['rsi30'] = np.where(df['rsi'] <= 30, rsi, 0)
+        # Create Above/Below trend columns and insert Doji prices if Above/Below trend line
+        df['above_trend'] = np.where(df['complete_doji'] > df['trend_line'], df.complete_doji, 0)
+        df['below_trend'] = np.where(df['complete_doji'] < df['trend_line'], df.complete_doji, 0)
+        df['five_max'] = np.where(df['above_trend'] > 0, 1, 0)
+        df['five_min'] = np.where(df['below_trend'] > 0, 1, 0)
+        pass
 
 
 def EWO(dataframe, ema_length=5, ema2_length=3):
