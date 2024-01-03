@@ -35,7 +35,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         'exit': 'gtc'
     }
 
-    timeframe = '1m'
+    timeframe = '5m'
     inf_1h = '1h'
     process_only_new_candles = True
     startup_candle_count = 400
@@ -46,20 +46,22 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         },
     }
 
+    # jstrk_adjust = True
+
     buy_params = {
         "buy_adx": 30,
-        "buy_ema_cofi": 0.961,
-        "buy_ewo_high": 11.945,
-        "buy_fastd": 25,
-        "buy_fastk": 20,
-        "candles_before": 159,
-        "candles_dca_multiplier": 57,
-        "dca_order_divider": 7,
-        "dca_wallet_divider": 4,
-        "distance_to_support_treshold": 0.018,
-        "max_safety_orders": 6,
-        "pct_drop_treshold": 0.011,
-        "rsi_buy": 61,
+        "buy_ema_cofi": 0.96,
+        "buy_ewo_high": 2.934,
+        "buy_fastd": 22,
+        "buy_fastk": 22,
+        "candles_before": 10,
+        "candles_dca_multiplier": 3,
+        "dca_order_divider": 4,
+        "dca_wallet_divider": 10,
+        "distance_to_support_treshold": 0.026,
+        "max_safety_orders": 7,
+        "pct_drop_treshold": 0.014,
+        "rsi_buy": 37,
         "base_nb_candles_buy": 12,  # value loaded from strategy
         "ewo_high": 3.001,  # value loaded from strategy
         "ewo_low": -10.289,  # value loaded from strategy
@@ -73,17 +75,17 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     # Sell hyperspace params:
     sell_params = {
-        "base_nb_candles_sell": 9,
-        "high_offset": 1.01,
-        "high_offset_2": 1.004
+        "base_nb_candles_sell": 18,
+        "high_offset": 1.003,
+        "high_offset_2": 1.007,
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-        "0": 0.243,
-        "24": 0.061,
-        "42": 0.029,
-        "162": 0
+        "0": 0.051,
+        "24": 0.026,
+        "40": 0.014,
+        "63": 0
     }
 
     is_optimize_dca = True
@@ -96,9 +98,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                                     space='buy', optimize=is_optimize_sr)
     pct_drop_treshold = DecimalParameter(0.01, 0.05, default=buy_params['pct_drop_treshold'], space='buy',
                                          optimize=is_optimize_dca)
-    candles_before = IntParameter(30, 200, default=buy_params['candles_before'], space='buy',
+    candles_before = IntParameter(10, 20, default=buy_params['candles_before'], space='buy',
                                   optimize=is_optimize_dca)
-    candles_dca_multiplier = IntParameter(30, 60, default=buy_params['candles_dca_multiplier'], space='buy',
+    candles_dca_multiplier = IntParameter(1, 30, default=buy_params['candles_dca_multiplier'], space='buy',
                                           optimize=is_optimize_dca)
     open_trade_limit = IntParameter(1, 10, default=buy_params['open_trade_limit'], space='buy', optimize=False)
 
@@ -132,11 +134,11 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=False)
 
     trailing_stop = True
-    trailing_stop_positive = 0.078
-    trailing_stop_positive_offset = 0.14400000000000002
+    trailing_stop_positive = 0.289
+    trailing_stop_positive_offset = 0.307
     trailing_only_offset_is_reached = False
 
-    max_open_trades = 35
+    max_open_trades = 25
     amend_last_stake_amount = True
 
     start = 0.02
@@ -264,6 +266,43 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         )
         return informative_pairs
 
+    def normalize_macd_value(self, value, min_val, max_val):
+        if isinstance(value, tuple) or isinstance(min_val, tuple) or isinstance(max_val, tuple):
+            return None
+        # Normalization of value to a range between 1 and 10
+        normalized = ((value - min_val) / (max_val - min_val)) * 9 + 1
+        return normalized
+
+    def red_candle_diff(self, dataframe: DataFrame) -> float:
+        dataframe['rozdil_cervene_svicky'] = 0.0
+        # urceni jesti je svicka cervena a pokud ano, urceni jejiho rozdilu mezi open a closed
+        mask = dataframe['open'] > dataframe['close']
+        dataframe.loc[mask, 'rozdil_cervene_svicky'] = dataframe['open'] - dataframe['close']
+        return dataframe['rozdil_cervene_svicky'].astype(float)
+
+    def normalize_to_0_100(self, dataframe: DataFrame):
+
+        result = []
+        window_size = 3  # Velikost časového okna 12 hodin
+
+        for i in range(len(dataframe)):
+            start_index = max(0, i - window_size + 1)  # Index začátku časového okna
+            end_index = i + 1  # Index konce časového okna
+
+            # Získání hodnot v časovém okně
+            window_values = dataframe[start_index:end_index]
+
+            # Najdi nejvyšší a nejnižší hodnotu v časovém okně
+            max_value = max(window_values)
+            min_value = min(window_values)
+
+            # Výpočet normalizované hodnoty pro aktuální hodnotu MACD v časovém okně
+            normalized_value = ((dataframe[i] - min_value) / (
+                    max_value - min_value)) * 100000 if max_value != min_value else 0
+            result.append(normalized_value)
+
+        return result
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Přidání nových sloupců kvůli funkcionalitě ostatních metod
         # if 'sell' not in dataframe.columns:
@@ -317,6 +356,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
+        dataframe['sma_50'] = ta.SMA(dataframe, timeperiod=50)
 
         # Elliot
         dataframe['EWO'] = EWO(dataframe, self.fast_ewo, self.slow_ewo)
@@ -469,6 +509,113 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         # dataframe.loc[stochastic_cond, 'buy_tag'] = 'buy_stoch_kd'
         # dataframe.loc[stochastic_cond, 'buy'] = 1
 
+        # if self.jstrk_adjust:
+        #     dataframe['macdnasobek'] = abs(dataframe['macd'] * dataframe['macdsignal']) / 2
+        #     dataframe['macdprocenta'] = abs(dataframe['macd']) / abs(dataframe['macdsignal']) * 100
+        #     dataframe['macdproc'] = (abs(abs(dataframe['macdsignal']) - abs(dataframe['macd'])) / (
+        #             0.5 * abs(dataframe['macdsignal']) - abs(dataframe['macd'])) * 100)
+        #     dataframe['macd_procenta_rozdil'] = (
+        #             abs(abs(dataframe['macdsignal']) - abs(dataframe['macd'])) / (dataframe['macdsignal'].abs()))
+        #     dataframe['macd_procenta_soucet'] = (
+        #             abs(abs(dataframe['macdsignal']) + abs(dataframe['macd'])) / (dataframe['macdsignal'].abs()))
+        #     dataframe['macd_soucet/2'] = ((abs(dataframe['macdsignal']) + abs(dataframe['macd'])) / 2).abs()
+        #     # Normalizace rozdílu MACD a MACD Signál do rozsahu 0-100
+        #     macd_values = dataframe['macd']
+        #     macd_signal_values = dataframe['macdsignal']
+        #     diff = np.array(macd_values) - np.array(macd_signal_values)
+        #     normalized_diff = ((diff - np.min(diff)) / (np.max(diff) - np.min(diff))) * 100
+        #     # Přidejte normalizované hodnoty do DataFrame
+        #     dataframe['normalized_macd_diff'] = normalized_diff.astype(int)
+        #     # Zavolejte funkci s daty 'macd_values' a přidejte výsledek do DataFrame
+        #     normalized_macd = self.normalize_to_0_100(macd_values)
+        #     dataframe['normalized_macd'] = normalized_macd
+        #     dataframe['rozdil_cervene_svicky'] = self.red_candle_diff(dataframe)
+        #     # vytvorime meritko s min max hodnotami rozdilu mezi rozdily svicek dataframe['rozdil_cervene_svicky'] za 36 hod
+        #     dataframe['rozdil_cervene_svicky'] = dataframe['rozdil_cervene_svicky'].astype(float)
+        #     # Vytvoření časového okna 36 hodin a určení minima a maxima
+        #     dataframe['min_36h'] = dataframe['rozdil_cervene_svicky'].rolling(window=14).min()
+        #     dataframe['max_36h'] = dataframe['rozdil_cervene_svicky'].rolling(window=14).max()
+        #     # dataframe['min_36h'] = urceni_rozdilu_svicky(dataframe, timeperiod=1).min()
+        #     # dataframe['max_36h'] = urceni_rozdilu_svicky(dataframe, timeperiod=1).max()
+        #     # Vytvoření sloupce pro procentuální poměr
+        #     dataframe['percentualni_pomer'] = (dataframe['rozdil_cervene_svicky'] - dataframe['min_36h']) / (
+        #             dataframe['max_36h'] - dataframe['min_36h']) * 100
+        #     # normalized value + rsi_mean * rsi_slow * weighted_rsi
+        #     dataframe['norm_macd-rsi'] = ((dataframe['normalized_macd'] + (
+        #             (dataframe['rsi_mean'] * 2) * dataframe['rsi_slow'] * dataframe['weighted_rsi'])) / dataframe[
+        #                                       'macd']) / 1000000
+        #
+        #     ranges = [
+        #         ((-0.00000001, -0.000000099), (0.00000001, 0.000000099)),
+        #         ((-0.0000001, -0.00000099), (0.0000001, 0.00000099)),
+        #         ((-0.000001, -0.0000099), (0.000001, 0.0000099)),
+        #         ((-0.00001, -0.000099), (0.00001, 0.000099)),
+        #         ((-0.0001, -0.00099), (0.0001, 0.00099)),
+        #         ((-0.001, -0.0099), (0.001, 0.0099)),
+        #         ((-0.01, -0.099), (0.01, 0.099)),
+        #         ((-0.1, 0.99), (0.1, 0.99)),
+        #         ((1, 1000), (1, 1000))
+        #     ]
+        #
+        #     # check the length of 'macd' column in the dataframe
+        #     if 'macd' in dataframe and not dataframe['macd'].empty:
+        #         values = dataframe['macd']
+        #
+        #         # check lenght of 'values' against 'ranges'
+        #         if len(values) != len(ranges):
+        #             print("Error: Lenghth of 'values' doesnt match the length of 'ranges'")
+        #         else:
+        #             # Normalize values for each graph to a range between 1 and 10
+        #             normalized_values_macd = []
+        #             for val, (min_val, max_val) in zip(values, ranges):
+        #                 normalized_macd = self.normalize_macd_value(val, min_val, max_val)
+        #                 if normalized_macd is not None:
+        #                     normalized_values_macd.append(normalized_macd)
+        #
+        #             # Add normalized MACD values to the existing DataFrame
+        #             dataframe['norm_macd'] = normalized_macd.astype(float)
+        #             dataframe['normalized_values_macd'] = normalized_values_macd.astype(float)
+        #     else:
+        #         print("Error: 'macd' column is either missing or empty in the DataFrame.")
+        #
+        #     # posun celeho macd grafu do kladnych cisel
+        #     dataframe['macd+5'] = dataframe['macd'] + 5
+        #     dataframe['macdsignal+5'] = dataframe['macdsignal'] + 5
+        #     dataframe['macd+5'] = dataframe['macd+5'].astype(float)
+        #     dataframe['macd+5min36h'] = dataframe['macd+5'].rolling(window=1000).min()
+        #     dataframe['macd+5max36h'] = dataframe['macd+5'].rolling(window=1000).max()
+        #     dataframe['macd+5percent'] = ((10 * dataframe['macd+5'] - 10 * dataframe['macd+5min36h']) / (
+        #             10 * dataframe['macd+5max36h'] - 10 * dataframe['macd+5min36h'])) * 10
+        #
+        #     # Přidání signálu 'jstkr'
+        #     # Vytváří 1, když je součet 'macd' a 'macd_signal' záporný a 'rsi' <= 30
+        #     dataframe['jstkr'] = (
+        #             (dataframe['macd'] + dataframe['percentualni_pomer'] > 98) & (dataframe['rsi_fast'] <= 3)).astype(
+        #         int)
+        #     # Výpočet macd_diff_percent podle dané rovnice
+        #     dataframe['macd_diff_percent'] = ((abs(dataframe['macdsignal'] - dataframe['macd'])) / (
+        #             0.5 * abs(dataframe['macdsignal'] + dataframe['macd']))) * 100
+        #     dataframe['macdsoucetid'] = (dataframe['macd'] + dataframe['macdsignal']) / 2
+        #     # Příklad hodnot MACD a MACD Signal
+        #     macd_values = dataframe['macd']  # Nahraďte skutečnými hodnotami MACD
+        #     macd_signal_values = dataframe['macdsignal']  # Nahraďte skutečnými hodnotami MACD Signal
+        #     # Vypočítání rozdílu mezi MACD a MACD Signal
+        #     diff = np.array(macd_values) - np.array(macd_signal_values)
+        #     # Normalizace rozdílu do rozsahu 0-100
+        #     normalized_diff = ((diff - np.min(diff)) / (np.max(diff) - np.min(diff))) * 100
+        #     dataframe['normalized_diff'] = normalized_diff.astype(int)
+        #     dataframe['rsi_mean'] = dataframe['rsi_mean'].astype(float)
+        #     dataframe['rsi_mean_fast'] = ((dataframe['rsi_mean'] + dataframe['rsi'] + dataframe[
+        #         'weighted_rsi']) / 4) + 5 * \
+        #                                  dataframe['macd+5percent']
+        #     dataframe['jstkr_2'] = ((dataframe['percentualni_pomer'] < 25.1) &
+        #                             (dataframe['percentualni_pomer'] > 0) &
+        #                             (dataframe['rsi_mean'] < 60) &
+        #                             (dataframe['rsi_mean_fast'] > 25) &
+        #                             (dataframe['rsi_mean_fast'] < 60) &
+        #                             (dataframe['macd+5percent'] < 0.01) &
+        #                             (dataframe['rsi_fast'] > 15)).astype(float)
+
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -476,11 +623,14 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
+        # Define the modified Fibonacci condition with directional check
         fib_cond = (
                 (dataframe['close'] <= dataframe['fib_618']) &
-                (dataframe['close'] >= dataframe['fib_618'] * 0.99)
+                (dataframe['close'] >= dataframe['fib_618'] * 0.99) &
+                (dataframe['sma_50'].shift(1) < dataframe['sma_50'])
         )
-        dataframe.loc[fib_cond, 'enter_tag'] += 'fib_0618_'
+
+        dataframe.loc[fib_cond, 'enter_tag'] += 'fib_sma_0618_'
         mka_conditions.append(fib_cond)
 
         conditions = []
@@ -544,19 +694,36 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         mka_conditions.append(cond_sar)
         mka_conditions.append(cond_candles)
 
-        if mka_conditions:
-            final_condition_mka = reduce(lambda x, y: x & y, mka_conditions)
-            final_condition_orig = reduce(lambda x, y: x | y, conditions)
-            final_condition = reduce(lambda x, y: x | y, [final_condition_mka, final_condition_orig])
-            dataframe.loc[final_condition, 'enter_long'] = 1
+        # jstkr_conditions = []
+        # if self.jstrk_adjust:
+        #     if 'jstkr_2' in dataframe.columns:
+        #         jstkr_cond = (dataframe['jstkr_2'] == 1)
+        #         jstkr_conditions.append(jstkr_cond)
+        #         dataframe.loc[jstkr_cond, 'enter_tag'] += 'jstkr_2_'
+        #     else:
+        #         jstkr_conditions.append(False)
+        #         pass
 
-        # dont_buy_conditions = [
-        #     dataframe['pnd_volume_warn'] < 0.0,
-        #     dataframe['btc_rsi_8_1h'] < 35.0
-        # ]
-        #
-        # for condition in dont_buy_conditions:
-        #     dataframe.loc[condition, 'enter_long'] = 0
+        # Processing final conditions
+        if mka_conditions:
+            try:
+                final_condition_mka = reduce(lambda x, y: x & y, mka_conditions)
+                final_condition_orig = reduce(lambda x, y: x | y, conditions)
+                # final_condition_jstkr = reduce(lambda x, y: x | y, jstkr_conditions)
+                final_condition = reduce(lambda x, y: x | y,
+                                         [final_condition_mka, final_condition_orig])
+                dataframe.loc[final_condition, 'enter_long'] = 1
+            except Exception as e:
+                logging.error(f"Error in final condition: {e}")
+                pass  # Replace with logging or error handling
+
+        dont_buy_conditions = [
+            dataframe['pnd_volume_warn'] < 0.0,
+            dataframe['btc_rsi_8_1h'] < 35.0
+        ]
+
+        for condition in dont_buy_conditions:
+            dataframe.loc[condition, 'enter_long'] = 0
 
         dataframe.loc[:, 'enter_short'] = 0
 
@@ -568,7 +735,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         dataframe.loc[
             (
-                (dataframe['close'] > dataframe['fib_618'])
+                    (dataframe['close'] > dataframe['fib_618']) &
+                    (dataframe['sma_50'].shift(1) > dataframe['sma_50'])
             ),
             'exit_long'] = 1
 
@@ -578,26 +746,22 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
-        # """ Získání dat pro potvrzení nákupního signálu """
-        # try:
-        #     dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        #     df = dataframe.copy()
-        # except Exception as e:
-        #     logging.error(f"Error getting analyzed dataframe: {e}")
-        #     return False
-        #
-        # # Získání aktuální svíčky
-        # last_candle = df.iloc[-1].squeeze()
-        # # Podmínky pro potvrzení nákupního signálu
-        # cond_candles = self.confirm_by_candles(last_candle)
-        # cond_sar = self.confirm_by_sar(last_candle)
-
-        # Příprava výsledku
         if 'force' in entry_tag:
             return True
-        result = (Trade.get_open_trade_count() < self.open_trade_limit.value)
-        # and (cond_candles or cond_sar)
-        return result
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+            df = dataframe.copy()
+            last_candle = df.iloc[-1].squeeze()
+            cond_candles = self.confirm_by_candles(last_candle)
+            # logging.info(f"{pair} has cond_candles status: {cond_candles}")
+            cond_sar = self.confirm_by_sar(last_candle)
+            # logging.info(f"{pair} has cond_sar status: {cond_sar}")
+            result = (Trade.get_open_trade_count() < self.open_trade_limit.value) and (cond_candles or cond_sar)
+            return result
+        except Exception as e:
+            logging.error(f"Error getting analyzed dataframe: {e}")
+
+        return False
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
@@ -627,25 +791,24 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
         if 'unclog' in exit_reason or 'force' in exit_reason:
-            logging.info(f"CTE - FORCE or UNCLOG, EXIT")
+            # logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
 
         # Kontrola, zda je aktuální high vyšší než open poslední svíčky
         last_candle = dataframe.iloc[-1]
         if last_candle['high'] > last_candle['open']:
-            logging.info(f"CTE - Cena stále roste (high > open), HOLD")
+            # logging.info(f"CTE - Cena stále roste (high > open), HOLD")
             return False
 
         if current_profit >= 0.0025:
             if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
-                logging.info(
-                    f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
+                # logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
                 return True
             elif ema_8_current > ema_14_current and diff_current > diff_previous:
-                logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
+                # logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
                 return False
             else:
-                logging.info(f"CTE - Conditions not met, EXIT")
+                # logging.info(f"CTE - Conditions not met, EXIT")
                 return True
         else:
             return False
@@ -711,17 +874,20 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                               key=lambda support: abs(x - support))
             )
 
-            if 'nearest_support' in df.columns:
+            # Injekce signálu JSTRK
+            if 'nearest_support' in df.columns:  # or self.jstrk_adjust:
                 # Získání poslední svíčky (candle) z dataframe
                 last_candle = df.iloc[-1]  # Datový typ: pandas Series
-                if 'nearest_support' in last_candle:
+                # Injekce signálu JSTRK
+                if 'nearest_support' in last_candle:  # or self.jstrk_adjust:
                     nearest_support = last_candle['nearest_support']  # Datový typ: float
                     # Výpočet procentní vzdálenosti k nejbližší podpoře
                     distance_to_support_pct = abs(
                         (nearest_support - current_rate) / current_rate)  # Datový typ: float, jednotka: %
                     # Kontrola, zda je aktuální kurz blízko nebo pod nejbližší podporou
+                    # Injekce signálu JSTRK
                     if (0 <= distance_to_support_pct <= self.distance_to_support_treshold.value) or (
-                            current_rate < nearest_support):
+                            current_rate < nearest_support):  # or self.jstrk_adjust:
                         # Počítání uzavřených nákupních příkazů
                         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in
                                             trade.orders)  # Datový typ: int
@@ -731,6 +897,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                             default=trade.open_date_utc)
                         last_buy_time = last_buy_time.replace(
                             tzinfo=None)  # Odstranění časové zóny, Datový typ: datetime
+
                         # Výpočet intervalu svíčky (candle) v minutách
                         candle_interval = self.timeframe_to_minutes(self.timeframe)  # Datový typ: int, jednotka: minuty
                         # Výpočet času od posledního nákupu v minutách
@@ -763,17 +930,23 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                         'weighted_rsi']  # Předpokládá se, že Weighted RSI je součástí dataframe
 
                                     if rsi_value <= w_rsi:
+                                        # Extra kontrola JSTRK - nebo bez něj
+                                        # if (not self.jstrk_adjust
+                                        #         or (self.jstrk_adjust and last_candle['jstkr_2'] == 1)):
                                         # Logování informací o obchodu
                                         logging.info(
                                             f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
                                         # Získání celkové částky sázky v peněžence
-                                        total_stake_amount = self.wallets.get_total_stake_amount() / self.dca_wallet_divider.value  # Datový typ: float
+                                        total_stake_amount = self.wallets.get_total_stake_amount()
+                                        # pokud bude signál ok, nemusíme tolik omezovat DCA
+                                        # / self.dca_wallet_divider.value
 
                                         # Výpočet částky pro další sázku pomocí DCA (Dollar Cost Averaging)
-                                        calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                                        decline=current_profit * 100,
-                                                                                        target_percent=1)  # Datový typ: float
+                                        calculated_dca_stake = self.calculate_dca_price(
+                                            base_value=trade.stake_amount,
+                                            decline=current_profit * 100,
+                                            target_percent=1)  # Datový typ: float
                                         # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
                                         while calculated_dca_stake >= total_stake_amount:
                                             calculated_dca_stake = calculated_dca_stake / self.dca_order_divider.value  # Datový typ: float
