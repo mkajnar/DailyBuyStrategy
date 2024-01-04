@@ -82,6 +82,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         "base_nb_candles_sell": 13,  # value loaded from strategy
         "high_offset": 1.002,  # value loaded from strategy
         "high_offset_2": 1.0,  # value loaded from strategy
+        "unclog_percents": 0.05
     }
 
     # ROI table:  # value loaded from strategy
@@ -95,6 +96,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     is_optimize_dca = True
     is_optimize_sr = True
     is_optimize_cofi = True
+    is_optimize_unclog = True
+
+    unclog_percents = DecimalParameter(0.01, 0.5, default=sell_params['unclog_percents'], space='sell', optimize=is_optimize_unclog)
 
     stoch_treshold = IntParameter(20, 40, default=buy_params['stoch_treshold'], space='buy', optimize=False)
 
@@ -114,8 +118,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     dca_order_divider = IntParameter(2, 10, default=buy_params['dca_order_divider'], space='buy',
                                      optimize=is_optimize_dca)
 
-    max_safety_orders = IntParameter(1, 10, default=buy_params['max_safety_orders'], space='buy',
-                                     optimize=is_optimize_dca)
+    # max_safety_orders = IntParameter(1, 10, default=buy_params['max_safety_orders'], space='buy',
+    #                                  optimize=is_optimize_dca)
 
     buy_ema_cofi = DecimalParameter(0.96, 0.98, default=0.97, optimize=is_optimize_cofi)
     buy_fastk = IntParameter(20, 30, default=20, optimize=is_optimize_cofi)
@@ -850,7 +854,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
-        if current_profit < -0.05 and (current_time - trade.open_date_utc).days >= 30:
+        if current_profit < -self.unclog_percents.value and (current_time - trade.open_date_utc).days >= 30:
             return 'unclog'
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -995,7 +999,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                         if time_since_last_buy < candles * candle_interval:
                             return None
                         # Kontrola, zda počet bezpečnostních příkazů (safety orders) není překročen
-                        if self.max_safety_orders.value >= count_of_buys:
+                        if int(self.buy_params['max_safety_orders']) >= count_of_buys:
                             # Hledání posledního uzavřeného nákupního příkazu
                             last_buy_order = None
                             for order in reversed(trade.orders):
@@ -1036,9 +1040,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                             base_value=trade.stake_amount,
                                             decline=current_profit * 100,
                                             target_percent=1)  # Datový typ: float
-                                        # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
-                                        while calculated_dca_stake >= total_stake_amount:
-                                            calculated_dca_stake = calculated_dca_stake / self.dca_order_divider.value  # Datový typ: float
+                                        # # Upravení velikosti sázky, pokud je vyšší než dostupný zůstatek
+                                        # while calculated_dca_stake >= total_stake_amount:
+                                        #     calculated_dca_stake = calculated_dca_stake / self.dca_order_divider.value  # Datový typ: float
                                         # Logování informací o upravené sázce
                                         logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
                                         # Vrácení upravené velikosti sázky
