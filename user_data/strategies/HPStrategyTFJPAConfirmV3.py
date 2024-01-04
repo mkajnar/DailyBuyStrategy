@@ -14,6 +14,8 @@ from technical.indicators import ichimoku
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from freqtrade.persistence import Trade
+
+from freqtrade.enums.tradingmode import TradingMode
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
 
@@ -287,8 +289,12 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         if self.config['stake_currency'] in ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'PAX', 'USD', 'EUR', 'GBP']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
+            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+                btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
+            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+                btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         informative_pairs.extend(
             ((btc_info_pair, self.timeframe), (btc_info_pair, self.inf_1h))
@@ -397,8 +403,12 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
+            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+                btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
+            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+                btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         btc_info_tf = self.dp.get_pair_dataframe(btc_info_pair, self.inf_1h)
         btc_info_tf = self.info_tf_btc_indicators(btc_info_tf)
