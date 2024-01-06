@@ -2,6 +2,7 @@ import json
 import logging
 import os
 from datetime import datetime
+from enum import Enum
 from functools import reduce
 from typing import Optional
 
@@ -19,6 +20,13 @@ from freqtrade.persistence import Trade
 from freqtrade.enums.tradingmode import TradingMode
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
+
+
+class CandleValueType(Enum):
+    HIGH = 'high'
+    LOW = 'low'
+    OPEN = 'open'
+    CLOSE = 'close'
 
 
 class HPStrategyTFJPAConfirmV3(IStrategy):
@@ -343,13 +351,48 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         return result
 
+    def find_pivots_high(self, df: pd.DataFrame, candleType: CandleValueType, num_neighbors=2):
+        pivot_array = np.full(len(df), np.nan)
+        pivots = []
+
+        for i in range(num_neighbors, len(df) - num_neighbors):
+            current_candle = df.iloc[i][candleType.value]
+
+            neighbors = [df.iloc[i - j][candleType.value] for j in range(1, num_neighbors + 1)] + \
+                        [df.iloc[i + j][candleType.value] for j in range(1, num_neighbors + 1)]
+
+            if all(current_candle >= neighbor for neighbor in neighbors):
+                pivots.append(i)
+
+        pivot_array[pivots] = df.iloc[pivots][candleType.value]
+        return pd.Series(pivot_array, index=df.index)
+
+    def find_pivots_low(self, df: pd.DataFrame, candleType: CandleValueType, num_neighbors=2):
+        pivot_array = np.full(len(df), np.nan)
+        pivots = []
+
+        for i in range(num_neighbors, len(df) - num_neighbors):
+            current_candle = df.iloc[i][candleType.value]
+
+            neighbors = [df.iloc[i - j][candleType.value] for j in range(1, num_neighbors + 1)] + \
+                        [df.iloc[i + j][candleType.value] for j in range(1, num_neighbors + 1)]
+
+            if all(current_candle <= neighbor for neighbor in neighbors):
+                pivots.append(i)
+
+        pivot_array[pivots] = df.iloc[pivots][candleType.value]
+        return pd.Series(pivot_array, index=df.index)
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.create_static_config()
 
         dataframe['lrsi'] = laguerre(dataframe=dataframe)
-
         dataframe['fibonacci_retracements'] = technical.indicators.fibonacci_retracements(df=dataframe)
+
+        last_100_candles = dataframe[-14:]
+        dataframe['lowest_price'] = last_100_candles['low'].min() * 1.2
+        dataframe['highest_price'] = last_100_candles['high'].max() * 0.8
 
         # Calculation of DOJI
         try:
@@ -727,13 +770,18 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
-        rsi_cond = ((dataframe['lrsi'] > 0)
-                    & (dataframe['lrsi'] < 0.10)
-                    & (dataframe['rsi'] >= 20)
-                    & (dataframe['rsi'] <= 40)
-                    & (dataframe['fibonacci_retracements'] < 0.786)
-                    & (dataframe['ema_diff_buy_signal'] > 0))
-        dataframe.loc[rsi_cond, 'enter_tag'] = 'lrsi'
+        # dataframe.loc[(qtpylib.crossed_below(dataframe['close'], dataframe['lowest_price'])), 'enter_long'] = 1
+        #
+        # return dataframe
+
+        rsi_cond = (((dataframe['lrsi'] > 0.1)
+                     & (dataframe['lrsi'] < 0.17)
+                     & (dataframe['rsi'] >= 10)
+                     & (dataframe['rsi'] <= 40)
+                     & dataframe['high'] > dataframe['open'])
+                    | ((dataframe['fibonacci_retracements'] < 0.786)
+                       & (dataframe['ema_diff_buy_signal'] > 0)) & dataframe['high'] > dataframe['open'])
+        dataframe.loc[rsi_cond, 'enter_tag'] = 'lrsi_rsi_grow_fib_ema'
         dataframe.loc[rsi_cond, 'enter_long'] = 1
 
         dont_buy_conditions = [
@@ -858,6 +906,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         dataframe.loc[:, 'exit_tag'] = ''
+
+        # dataframe.loc[(qtpylib.crossed_above(dataframe['high'], dataframe['highest_price'])), 'exit_long'] = 1
+        #
+        # return dataframe
 
         dataframe.loc[
             (
