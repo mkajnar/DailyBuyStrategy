@@ -731,7 +731,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                     & (dataframe['lrsi'] < 0.10)
                     & (dataframe['rsi'] >= 20)
                     & (dataframe['rsi'] <= 40)
-                    & (dataframe['fibonacci_retracements'] < 0.786))
+                    & (dataframe['fibonacci_retracements'] < 0.786)
+                    & (dataframe['ema_diff_buy_signal'] > 0))
         dataframe.loc[rsi_cond, 'enter_tag'] = 'lrsi'
         dataframe.loc[rsi_cond, 'enter_long'] = 1
 
