@@ -727,7 +727,11 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
-        rsi_cond = ((dataframe['lrsi'] > 0) & (dataframe['lrsi'] < 0.2) & (dataframe['rsi'] >= 20) & (dataframe['rsi'] <= 45) & (dataframe['fibonacci_retracements'] < 0.786))
+        rsi_cond = ((dataframe['lrsi'] > 0)
+                    & (dataframe['lrsi'] < 0.10)
+                    & (dataframe['rsi'] >= 20)
+                    & (dataframe['rsi'] <= 40)
+                    & (dataframe['fibonacci_retracements'] < 0.786))
         dataframe.loc[rsi_cond, 'enter_tag'] = 'lrsi'
         dataframe.loc[rsi_cond, 'enter_long'] = 1
 
