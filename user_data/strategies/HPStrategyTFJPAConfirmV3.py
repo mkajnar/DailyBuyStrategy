@@ -727,16 +727,9 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
 
-        dataframe.loc[((dataframe['lrsi'] > 0) &
-                       (dataframe['lrsi'] < 0.2) &
-                       (dataframe['rsi'] >= 20) &
-                       (dataframe['rsi'] <= 30) &
-                       (dataframe['fibonacci_retracements'] < 0.786)), 'enter_tag'] = 'lrsi'
-        dataframe.loc[((dataframe['lrsi'] > 0) &
-                       (dataframe['lrsi'] < 0.2) &
-                       (dataframe['rsi'] >= 20) &
-                       (dataframe['rsi'] <= 30) &
-                       (dataframe['fibonacci_retracements'] < 0.768)), 'enter_long'] = 1
+        rsi_cond = ((dataframe['lrsi'] > 0) & (dataframe['lrsi'] < 0.2) & (dataframe['rsi'] >= 20) & (dataframe['rsi'] <= 45) & (dataframe['fibonacci_retracements'] < 0.786))
+        dataframe.loc[rsi_cond, 'enter_tag'] = 'lrsi'
+        dataframe.loc[rsi_cond, 'enter_long'] = 1
 
         dont_buy_conditions = [
             dataframe['pnd_volume_warn'] < 0.0,
