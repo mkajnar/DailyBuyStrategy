@@ -9,8 +9,9 @@ import numpy as np
 import pandas as pd
 import talib
 import talib.abstract as ta
+import technical.consensus
 from pandas import DataFrame
-from technical.indicators import ichimoku
+from technical.indicators import ichimoku, laguerre
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from freqtrade.persistence import Trade
@@ -55,19 +56,19 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     # jstrk_adjust = True
 
     buy_params = {
-        "buy_adx": 21,
-        "buy_ema_cofi": 0.962,
-        "buy_ewo_high": 4.568,
-        "buy_fastd": 21,
-        "buy_fastk": 20,
-        "candles_before": 20,
+        "buy_adx": 20,
+        "buy_ema_cofi": 0.98,
+        "buy_ewo_high": 4.179,
+        "buy_fastd": 20,
+        "buy_fastk": 22,
+        "candles_before": 60,
         "candles_dca_multiplier": 7,
         "dca_order_divider": 6,
-        "dca_wallet_divider": 4,
+        "dca_wallet_divider": 2,
         "distance_to_support_treshold": 0.043,
         "max_safety_orders": 3,
-        "pct_drop_treshold": 0.013,
-        "rsi_buy": 69,
+        "pct_drop_treshold": 0.05,
+        "rsi_buy": 58,
         "base_nb_candles_buy": 12,  # value loaded from strategy
         "ewo_high": 3.001,  # value loaded from strategy
         "ewo_low": -10.289,  # value loaded from strategy
@@ -81,26 +82,31 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
     # Sell hyperspace params:
     sell_params = {
-        "base_nb_candles_sell": 13,  # value loaded from strategy
-        "high_offset": 1.002,  # value loaded from strategy
-        "high_offset_2": 1.0,  # value loaded from strategy
-        "unclog_percents": 0.05
+        "base_nb_candles_sell": 22,  # value loaded from strategy
+        "high_offset": 1.014,  # value loaded from strategy
+        "high_offset_2": 1.01,  # value loaded from strategy
+        "unclog_percents": 0.10
     }
 
     # ROI table:  # value loaded from strategy
     minimal_roi = {
-        "0": 0.109,
-        "17": 0.035,
-        "51": 0.011,
-        "104": 0
+        "0": 0.50,
+        "30": 0.30,
+        "60": 0.20,
+        "90": 0.10,
+        "120": 0.5,
+        "150": 0.3,
+        "180": 0.1,
+        "240": 0
     }
 
-    is_optimize_dca = True
-    is_optimize_sr = True
-    is_optimize_cofi = True
-    is_optimize_unclog = True
+    is_optimize_dca = False
+    is_optimize_sr = False
+    is_optimize_cofi = False
+    is_optimize_unclog = False
 
-    unclog_percents = DecimalParameter(0.01, 0.5, default=sell_params['unclog_percents'], space='sell', optimize=is_optimize_unclog)
+    unclog_percents = DecimalParameter(0.01, 0.5, default=sell_params['unclog_percents'], space='sell',
+                                       optimize=is_optimize_unclog)
 
     stoch_treshold = IntParameter(20, 40, default=buy_params['stoch_treshold'], space='buy', optimize=False)
 
@@ -114,8 +120,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                           optimize=is_optimize_dca)
     open_trade_limit = IntParameter(1, 10, default=buy_params['open_trade_limit'], space='buy', optimize=False)
 
-    dca_wallet_divider = IntParameter(open_trade_limit.value - 1, 10, default=buy_params['dca_wallet_divider'],
-                                      space='buy', optimize=is_optimize_dca)
+    dca_wallet_divider = IntParameter(2, 10, default=buy_params['dca_wallet_divider'], space='buy',
+                                      optimize=is_optimize_dca)
 
     dca_order_divider = IntParameter(2, 10, default=buy_params['dca_order_divider'], space='buy',
                                      optimize=is_optimize_dca)
@@ -144,8 +150,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     ewo_high = DecimalParameter(3.0, 5, default=buy_params['ewo_high'], space='buy', optimize=False)
 
     trailing_stop = True
-    trailing_stop_positive = 0.206
-    trailing_stop_positive_offset = 0.278
+    trailing_stop_positive = 0.01
+    trailing_stop_positive_offset = 0.05
     trailing_only_offset_is_reached = True
 
     max_open_trades = 25
@@ -165,7 +171,6 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     base_nb_candles_sell = IntParameter(8, 20, default=sell_params['base_nb_candles_sell'], space='sell', optimize=True)
     high_offset = DecimalParameter(1.000, 1.010, default=sell_params['high_offset'], space='sell', optimize=True)
     high_offset_2 = DecimalParameter(1.000, 1.010, default=sell_params['high_offset_2'], space='sell', optimize=True)
-
 
     @property
     def protections(self):
@@ -289,11 +294,11 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         if self.config['stake_currency'] in ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'PAX', 'USD', 'EUR', 'GBP']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         informative_pairs.extend(
@@ -324,7 +329,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
             start_index = max(0, i - window_size + 1)  # Time window start index
             end_index = i + 1  # Time window end index
 
-            # Get values ​​in a time window
+            # Get values in a time window
             window_values = dataframe[start_index:end_index]
 
             # Find the highest and lowest value in a time window
@@ -341,6 +346,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
         self.create_static_config()
+
+        dataframe['lrsi'] = laguerre(dataframe=dataframe)
+
+        dataframe['fibonacci_retracements'] = technical.indicators.fibonacci_retracements(df=dataframe)
 
         # Calculation of DOJI
         try:
@@ -373,8 +382,10 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
             dataframe['rsi70'] = np.where(dataframe['rsi'] >= 70, rsi, 0)
             dataframe['rsi30'] = np.where(dataframe['rsi'] <= 30, rsi, 0)
             # Create Above/Below trend columns and insert Doji prices if Above/Below trend line
-            dataframe['above_trend'] = np.where(dataframe['complete_doji'] > dataframe['trend_line'], dataframe.complete_doji, 0)
-            dataframe['below_trend'] = np.where(dataframe['complete_doji'] < dataframe['trend_line'], dataframe.complete_doji, 0)
+            dataframe['above_trend'] = np.where(dataframe['complete_doji'] > dataframe['trend_line'],
+                                                dataframe.complete_doji, 0)
+            dataframe['below_trend'] = np.where(dataframe['complete_doji'] < dataframe['trend_line'],
+                                                dataframe.complete_doji, 0)
             dataframe['five_max'] = np.where(dataframe['above_trend'] > 0, 1, 0)
             dataframe['five_min'] = np.where(dataframe['below_trend'] > 0, 1, 0)
             dataframe.merge(dataframe, on='date')
@@ -403,11 +414,11 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         btc_info_tf = self.dp.get_pair_dataframe(btc_info_pair, self.inf_1h)
@@ -715,6 +726,27 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
 
         mka_conditions = []
         dataframe.loc[:, 'enter_tag'] = ''
+
+        dataframe.loc[((dataframe['lrsi'] > 0) &
+                       (dataframe['lrsi'] < 0.2) &
+                       (dataframe['rsi'] >= 20) &
+                       (dataframe['rsi'] <= 30) &
+                       (dataframe['fibonacci_retracements'] < 0.786)), 'enter_tag'] = 'lrsi'
+        dataframe.loc[((dataframe['lrsi'] > 0) &
+                       (dataframe['lrsi'] < 0.2) &
+                       (dataframe['rsi'] >= 20) &
+                       (dataframe['rsi'] <= 30) &
+                       (dataframe['fibonacci_retracements'] < 0.768)), 'enter_long'] = 1
+
+        dont_buy_conditions = [
+            dataframe['pnd_volume_warn'] < 0.0,
+            dataframe['btc_rsi_8_1h'] < 35.0
+        ]
+
+        for condition in dont_buy_conditions:
+            dataframe.loc[condition, 'enter_long'] = 0
+
+        return dataframe
 
         # Define the modified Fibonacci condition with directional check
         fib_cond = (
@@ -1041,7 +1073,7 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                             f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
 
                                         # Get the total bet amount in the wallet
-                                        total_stake_amount = self.wallets.get_total_stake_amount()
+                                        total_stake_amount = self.wallets.get_total_stake_amount() / self.dca_wallet_divider.value
                                         # if the signal is ok, we don't need to limit the DCA so much
                                         # / self.dca_wallet_divider.value
 
@@ -1051,8 +1083,8 @@ class HPStrategyTFJPAConfirmV3(IStrategy):
                                             decline=current_profit * 100,
                                             target_percent=1)  # Data type: float
                                         # # Adjusting the bet size if it is higher than the available balance
-                                        # while calculated_dca_stake >= total_stake_amount:
-                                        #     calculated_dca_stake = calculated_dca_stake / self.dca_order_divider.value  # Data type: float
+                                        while calculated_dca_stake >= total_stake_amount:
+                                            calculated_dca_stake = calculated_dca_stake / self.dca_order_divider.value  # Data type: float
                                         # Logging of adjusted bet information
                                         logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
                                         # Returns the adjusted bet size
