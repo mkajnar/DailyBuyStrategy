@@ -111,12 +111,17 @@ class HPSDivergence(IStrategy):
     trailing_only_offset_is_reached = True
 
     minimal_roi = {
-        "0": 1,
-        "30": 0.10,
-        "60": 0.05,
-        "90": 0.03,
-        "120": 0.01,
-        "240": 0
+        "0": 0.5,
+        "120": 0.3,
+        "240": 0.1,
+        "360": 0.07,
+        "480": 0.05,
+        "720": 0.03,
+        "960": 0.01,
+        "1440": 0.005,
+        "2880": 0.003,
+        "4320": 0.001,
+        "5760": 0.000
     }
 
     order_types = {
@@ -732,7 +737,7 @@ class HPSDivergence(IStrategy):
         ema_8_current = dataframe['ema_8'].iat[-1]
         ema_14_current = dataframe['ema_14'].iat[-1]
 
-        # EMA values ​​of the previous candle
+        # EMA values of the previous candle
         ema_8_previous = dataframe['ema_8'].iat[-2]
         ema_14_previous = dataframe['ema_14'].iat[-2]
 
@@ -763,6 +768,40 @@ class HPSDivergence(IStrategy):
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'exit_tag'] = ''
+
+        dataframe.loc[
+            (
+                    (dataframe['close'] > dataframe['fib_618']) &
+                    (dataframe['sma_50'].shift(1) > dataframe['sma_50'])
+            ),
+            'exit_tag'] = 'fib_618_sma_50'
+
+        dataframe.loc[
+            (
+                    (dataframe['close'] > dataframe['fib_618']) &
+                    (dataframe['sma_50'].shift(1) > dataframe['sma_50'])
+            ),
+            'exit_long'] = 1
+
+
+        dataframe.loc[
+            (
+                    (dataframe['close'] < dataframe['stop_loss'].shift(1)) |
+                    (dataframe['close'] > dataframe['take_profit'].shift(1))
+            ),
+            'exit_tag'] = 'psl'
+
+        dataframe.loc[
+            (
+                    (dataframe['close'] < dataframe['stop_loss'].shift(1)) |
+                    (dataframe['close'] > dataframe['take_profit'].shift(1))
+            ),
+            'exit_long'] = 1
+
+        # dataframe.loc[(dataframe['five_max'] == 1), 'exit_long'] = 1
+        # dataframe.loc[(dataframe['five_max'] == 1), 'exit_tag'] = 'five_max'
+
+        dataframe.loc[:, 'exit_short'] = 0
         return dataframe
     
     def percentage_drop_indicator(self, dataframe, period, threshold=0.3):
