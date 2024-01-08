@@ -572,7 +572,7 @@ class HPSDivergence(IStrategy):
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
-        if current_profit < -0.05 and (current_time - trade.open_date_utc).days >= 7:
+        if current_profit < -0.05 and (current_time - trade.open_date_utc).days >= 30:
             return 'unclog'
 
     def order_price(self, free_amount, positions, dca_buys):
@@ -727,17 +727,32 @@ class HPSDivergence(IStrategy):
         return result
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
-                           rate: float, time_in_force: str, sell_reason: str,
+                           rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        sell_reason = f"{sell_reason}_" + trade.enter_tag
+        exit_reason = f"{exit_reason}_{trade.enter_tag}"
+
+        if 'unclog' in exit_reason or 'force' in exit_reason:
+            # logging.info(f"CTE - FORCE or UNCLOG, EXIT")
+            return True
+
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+
+        if 'psl' in exit_reason:
+            logging.info(f"CTE - PSL EXIT")
+            return True
+
+        # Checking if the current high is higher than the open of the last candle
+        last_candle = dataframe.iloc[-1]
+        if last_candle['high'] > last_candle['open']:
+            # logging.info(f"CTE - Cena stále roste (high > open), HOLD")
+            return False
 
         # Current EMA values
         ema_8_current = dataframe['ema_8'].iat[-1]
         ema_14_current = dataframe['ema_14'].iat[-1]
 
-        # EMA values of the previous candle
+        # EMA values e previous candle
         ema_8_previous = dataframe['ema_8'].iat[-2]
         ema_14_previous = dataframe['ema_14'].iat[-2]
 
@@ -748,19 +763,15 @@ class HPSDivergence(IStrategy):
         # Calculation of percentage change between diff_current and diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
-        if 'unclog' in sell_reason or 'force' in sell_reason:
-            if (log_level.value <= 1): logging.info(f"CTE - FORCE or UNCLOG, EXIT")
-            return True
-        elif current_profit >= 0.0025:
+        if current_profit >= 0.0025:
             if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
-                if (log_level.value <= 1): logging.info(
-                    f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
+                # logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
                 return True
             elif ema_8_current > ema_14_current and diff_current > diff_previous:
-                if (log_level.value <= 1): logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
+                # logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
                 return False
             else:
-                if (log_level.value <= 1): logging.info(f"CTE - Conditions not met, EXIT")
+                # logging.info(f"CTE - Conditions not met, EXIT")
                 return True
         else:
             return False
