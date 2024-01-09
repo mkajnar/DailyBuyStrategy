@@ -259,6 +259,16 @@ class HPSDivergence(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
+
+        if 'enter_tag' not in dataframe.columns:
+            dataframe.loc[:, 'enter_tag'] = ''
+        if 'exit_tag' not in dataframe.columns:
+            dataframe.loc[:, 'exit_tag'] = ''
+        if 'enter_long' not in dataframe.columns:
+            dataframe.loc[:, 'enter_long'] = 0
+        if 'exit_long' not in dataframe.columns:
+            dataframe.loc[:, 'exit_long'] = 0
+            
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
