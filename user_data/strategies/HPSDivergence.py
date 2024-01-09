@@ -12,6 +12,7 @@ from enum import Enum
 import numpy as np
 import talib.abstract as ta
 from pandas import DataFrame
+from talib import CDLDOJI
 from technical.indicators import ichimoku
 
 import freqtrade.vendor.qtpylib.indicators as qtpylib
@@ -19,9 +20,11 @@ from freqtrade.enums.tradingmode import TradingMode
 from freqtrade.persistence import Trade, LocalTrade, Order
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
+from freqtrade import freqtradebot
 
 from modules.lambo2 import Lambo
 from modules.elliot import Elliot
+
 
 def pct_change(a, b):
     return (b - a) / a
@@ -33,21 +36,30 @@ class LogLevel(Enum):
     WARNING = 2
     ERROR = 3
 
+
 log_level = LogLevel.ERROR
-    
+
+
 class HPSDivergence(IStrategy):
     INTERFACE_VERSION = 3
 
     support_dict = {}
     resistance_dict = {}
 
+    timeframed_drops = {'1m': -0.02,
+                        '5m': -0.03,
+                        '15m': -0.05,
+                        '1h': -0.1
+                        }
+
     max_safety_orders = 3
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
+    # locked = []
     pairs_close_to_high = []
 
-    out_open_trades_limit = 6
+    out_open_trades_limit = 10
     is_optimize_cofi = False
     use_exit_signal = True
     exit_profit_only = True
@@ -59,7 +71,7 @@ class HPSDivergence(IStrategy):
         'exit': 'gtc'
     }
 
-    timeframe = '1m'
+    # timeframe = '1m'
     inf_1h = '1h'
     process_only_new_candles = True
     startup_candle_count = 400
@@ -80,9 +92,10 @@ class HPSDivergence(IStrategy):
         "high_offset_2": 1.01
     }
 
-    #lambo2
+    # lambo2
     lambo2 = Lambo()
-    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=lambo2.lambo2_ema_14_factor, space='buy', optimize=True)
+    lambo2_ema_14_factor = DecimalParameter(0.8, 1.2, decimals=3, default=lambo2.lambo2_ema_14_factor, space='buy',
+                                            optimize=True)
     lambo2_rsi_4_limit = IntParameter(10, 60, default=lambo2.lambo2_rsi_4_limit, space='buy', optimize=True)
     lambo2_rsi_14_limit = IntParameter(10, 60, default=lambo2.lambo2_rsi_14_limit, space='buy', optimize=True)
     lambo2.use_hyperopts(lambo2_ema_14_factor, lambo2_rsi_4_limit, lambo2_rsi_14_limit)
@@ -100,9 +113,10 @@ class HPSDivergence(IStrategy):
     buy_fastd = IntParameter(20, 30, default=elliot.buy_fastd, optimize=True)
     buy_adx = IntParameter(20, 30, default=elliot.buy_adx, optimize=True)
     buy_ewo_high = DecimalParameter(2, 12, default=elliot.buy_ewo_high, optimize=True)
-    elliot.use_hyperopts(base_nb_candles_sell, base_nb_candles_buy, low_offset, ewo_high, ewo_low, rsi_buy, high_offset, buy_ema_cofi, buy_fastk, buy_fastd, buy_adx, buy_ewo_high)
-    
-    #Stop loss management
+    elliot.use_hyperopts(base_nb_candles_sell, base_nb_candles_buy, low_offset, ewo_high, ewo_low, rsi_buy, high_offset,
+                         buy_ema_cofi, buy_fastk, buy_fastd, buy_adx, buy_ewo_high)
+
+    # Stop loss management
     stoploss = -0.9
 
     trailing_stop = True
@@ -185,7 +199,8 @@ class HPSDivergence(IStrategy):
 
     def version(self) -> str:
         return "HPDivergence v1.0"
-    
+
+
     def pivot_points(self, high, low, period=10):
         pivot_high = high.rolling(window=2 * period + 1, center=True).max()
         pivot_low = low.rolling(window=2 * period + 1, center=True).min()
@@ -255,11 +270,11 @@ class HPSDivergence(IStrategy):
         pair = metadata['pair']
         if self.config['stake_currency'] in ['USDT', 'BUSD']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         btc_info_tf = self.dp.get_pair_dataframe(btc_info_pair, self.inf_1h)
@@ -274,7 +289,6 @@ class HPSDivergence(IStrategy):
         drop_columns = [f"{s}_{self.timeframe}" for s in ['date', 'open', 'high', 'low', 'close', 'volume']]
         dataframe.drop(columns=dataframe.columns.intersection(drop_columns), inplace=True)
 
-
         dataframe['hma_50'] = qtpylib.hull_moving_average(dataframe['close'], window=50)
         dataframe['sma_2'] = ta.SMA(dataframe, timeperiod=2)
         dataframe['sma_9'] = ta.SMA(dataframe, timeperiod=9)
@@ -285,9 +299,9 @@ class HPSDivergence(IStrategy):
         dataframe['rsi_fast'] = ta.RSI(dataframe, timeperiod=4)
         dataframe['rsi_slow'] = ta.RSI(dataframe, timeperiod=20)
 
-        #Lambo2
+        # Lambo2
         dataframe = self.lambo2.populate_indicators(dataframe)
-        #Elliot
+        # Elliot
         dataframe = self.elliot.populate_indicators(dataframe)
 
         # Cofi
@@ -330,7 +344,6 @@ class HPSDivergence(IStrategy):
         dataframe['fib_500'] = dataframe['high_max'] - 0.500 * diff
         dataframe['fib_618'] = dataframe['high_max'] - 0.618 * diff
         dataframe['fib_786'] = dataframe['high_max'] - 0.786 * diff
-
 
         # MACD a Volatility Factor
         macd = ta.MACD(dataframe)
@@ -376,7 +389,7 @@ class HPSDivergence(IStrategy):
 
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
 
-        #Add timeframe trend
+        # Add timeframe trend
         resampled_frame = dataframe.resample('5T', on='date').agg({
             'open': 'first',
             'high': 'max',
@@ -388,11 +401,11 @@ class HPSDivergence(IStrategy):
         resampled_frame['higher_tf_trend'] = resampled_frame['higher_tf_trend'].replace({1: 1, 0: -1})
         dataframe['higher_tf_trend'] = dataframe['date'].map(resampled_frame['higher_tf_trend'])
 
+        dataframe['doji_candle'] = (CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close']) > 0).astype(int)
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.dynamic_stop_loss_take_profit(dataframe=dataframe)
 
         return dataframe
-
 
     def dynamic_stop_loss_take_profit(self, dataframe: DataFrame) -> DataFrame:
         # Příklad: Stop-loss a take-profit založený na ATR
@@ -400,7 +413,7 @@ class HPSDivergence(IStrategy):
         dataframe['stop_loss'] = dataframe['low'].shift(1) - atr.shift(1) * 0.8
         dataframe['take_profit'] = dataframe['high'].shift(1) + atr.shift(1) * 2.5
         return dataframe
-    
+
     def calculate_dca_price(self, base_value, decline, target_percent):
         return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
@@ -467,16 +480,22 @@ class HPSDivergence(IStrategy):
 
         return dataframe
 
-
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'enter_tag'] = ''
         dataframe.loc[:, 'sell_tag'] = ''
         conditions = []
 
-        #Lambo2
+        last_candle = dataframe.iloc[-1]
+        if last_candle['doji_candle'] == 1:
+            logging.info(f"Doji detected on {metadata['pair']}")
+            self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
+                minutes=self.timeframe_to_minutes(self.timeframe) * 10))
+            return dataframe
+
+        # Lambo2
         (dataframe, conditions) = self.lambo2.populate_entry_trend(dataframe, conditions)
-        
-        #Elliot Waves
+
+        # Elliot Waves
         (dataframe, conditions) = self.elliot.populate_entry_trend_v1(dataframe, conditions)
         (dataframe, conditions) = self.elliot.populate_entry_trend_v2(dataframe, conditions)
         (dataframe, conditions) = self.elliot.populate_entry_trend_cofi(dataframe, conditions)
@@ -540,8 +559,8 @@ class HPSDivergence(IStrategy):
         dont_buy_conditions = [
             dataframe['pnd_volume_warn'] < 0.0,
             dataframe['btc_rsi_8_1h'] < 35.0,
-            #Dont enter late
-            #Given all positions are full and one is closed, we want to open on first buy signal
+            # Dont enter late
+            # Given all positions are full and one is closed, we want to open on first buy signal
             (dataframe['enter_long'].shift(1) == 1 & (dataframe['sma_2'].shift(1) < dataframe['sma_2']))
         ]
 
@@ -572,7 +591,7 @@ class HPSDivergence(IStrategy):
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
-        if current_profit < -0.05 and (current_time - trade.open_date_utc).days >= 30:
+        if current_profit < -0.15 and (current_time - trade.open_date_utc).days >= 60:
             return 'unclog'
 
     def order_price(self, free_amount, positions, dca_buys):
@@ -585,18 +604,17 @@ class HPSDivergence(IStrategy):
 
         if self.config['stake_currency'] in ['USDT', 'BUSD', 'USDC', 'DAI', 'TUSD', 'PAX', 'USD', 'EUR', 'GBP']:
             btc_info_pair = f"BTC/{self.config['stake_currency']}"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
         else:
             btc_info_pair = "BTC/USDT"
-            if(self.config['trading_mode'] == TradingMode.FUTURES): 
+            if (self.config['trading_mode'] == TradingMode.FUTURES):
                 btc_info_pair = btc_info_pair + f":{self.config['stake_currency']}"
 
         informative_pairs.extend(
             ((btc_info_pair, self.timeframe), (btc_info_pair, self.inf_1h))
         )
         return informative_pairs
-
 
     def base_tf_btc_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe['price_trend_long'] = (
@@ -611,111 +629,108 @@ class HPSDivergence(IStrategy):
         dataframe.rename(columns=lambda s: f"btc_{s}" if s not in ignore_columns else s, inplace=True)
         return dataframe
 
-
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
+
+        if current_rate is None:
+            return None
+
         # Update the current time to the current UTC time
-        current_time = datetime.utcnow()  # Datový typ: datetime
+        pct_threshold = self.timeframed_drops[self.timeframe]
+        # logging.info(f"Timeframe: {self.timeframe}, Pct Threshold: {pct_threshold}")
+        current_time = datetime.utcnow()
 
         try:
-            # Get an analyzed dataframe for a given trading pair and time frame
+            # Get an analyzed dataframe for the specified trading pair and timeframe
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-            df = dataframe.copy()  # Datový typ: pandas DataFrame
+            df = dataframe.copy()
         except Exception as e:
-            # Error logging when getting a dataframe and exiting a method
+            # Log an error if there's an issue retrieving the dataframe and exit the method
             if (log_level.value <= 3): logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        # Checking if a trading pair has a defined support
-        if trade.pair in self.support_dict:
-            # Get a list of supports for a given trading pair
-            s = self.support_dict[trade.pair]  # Data type: sheet
+        last_candle = df.iloc[-1]
 
-            # Calculating nearest support for each closing price in the dataframe
-            df['nearest_support'] = df['close'].apply(
-                lambda x: min([support for support in s if support <= x], default=x,
-                              key=lambda support: abs(x - support))
-            )
+        # Initialize the lowest price for the trade pair if it's not already set
+        if trade.pair not in self.lowest_prices:
+            self.lowest_prices[trade.pair] = trade.open_rate
 
-            if 'nearest_support' in df.columns:
+        if trade.pair not in self.price_drop_percentage:
+            self.price_drop_percentage[trade.pair] = {"last_drop_time": current_time, "last_drop_rate": current_rate}
 
-                # Getting the last candle from the dataframe
-                last_candle = df.iloc[-1]  # Datový typ: pandas Series
+        # Update the lowest price if the current rate is lower
+        if current_rate < self.lowest_prices[trade.pair]:
+            self.lowest_prices[trade.pair] = current_rate
 
-                if 'nearest_support' in last_candle:
-                    nearest_support = last_candle['nearest_support']  # Data type: float
-                    # Calculation of the percentage distance to the nearest support
-                    distance_to_support_pct = abs(
-                        (nearest_support - current_rate) / current_rate)  # Data type: float, unit: %
-                    # Checking if the current rate is near or below the nearest support
-                    if (0 <= distance_to_support_pct <= 0.01) or (current_rate < nearest_support):
-                        # Counting closed purchase orders
-                        count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in
-                                            trade.orders)  # Data type: int
-                        # Finding the time of the last purchase
-                        last_buy_time = max(
-                            [order.order_date for order in trade.orders if order.ft_order_side == 'enter_long'],
-                            default=trade.open_date_utc)
-                        last_buy_time = last_buy_time.replace(
-                            tzinfo=None)  # Time zone removal, Data type: datetime
-                        # Candle interval calculation in minutes
-                        candle_interval = self.timeframe_to_minutes(self.timeframe)  # Data type: int, unit: minutes
-                        # Calculation of the time since the last purchase in minutes
-                        time_since_last_buy = (
-                                                      current_time - last_buy_time).total_seconds() / 60  # Data type: float, unit: minutes
-                        # Calculation of the number of candles that must expire before the next purchase
-                        candles = 60 + (30 * (count_of_buys - 1))  # Data type: int
-                        # Checking if enough time has passed since the last purchase
-                        if time_since_last_buy < candles * candle_interval:
-                            return None
-                        # Checking whether the number of safety orders has not been exceeded
-                        if self.max_safety_orders >= count_of_buys:
-                            # Searching for the last closed purchase order
-                            last_buy_order = None
-                            for order in reversed(trade.orders):
-                                if order.ft_order_side == 'buy' and order.status == 'closed':
-                                    last_buy_order = order
-                                    break
-                            # Definition of the threshold value for the next purchase
-                            pct_threshold = -0.03  # Data type: float, jednotka: %
-                            # Calculation of the percentage difference between the last buy order and the current rate
-                            pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
-                                                                            current_price=current_rate)  # Data type: float, unit: %
-                            # Checking if the percentage difference is less than a threshold value
-                            if pct_diff <= pct_threshold:
-                                if last_buy_order and current_rate < last_buy_order.price:
-                                    # Checking RSI conditions for DCA
-                                    rsi_value = last_candle['rsi']  # RSI is assumed to be part of the dataframe
-                                    w_rsi = last_candle[
-                                        'weighted_rsi']  # Weighted RSI is assumed to be part of the dataframe
+        # Calculate the percentage drop from the opening rate
+        price_drop = (self.lowest_prices[trade.pair] - trade.open_rate) / trade.open_rate
 
-                                    if rsi_value <= w_rsi:
-                                        # Logging of store information
-                                        if (log_level.value <= 1): logging.info(
-                                            f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+        # Record the time if the price drop exceeds 5%
+        if ((price_drop <= pct_threshold)
+                and (self.price_drop_percentage[trade.pair].get("last_drop_time", current_time) != current_time)):
 
-                                        # Get the total bet amount in the wallet
-                                        total_stake_amount = self.wallets.get_total_stake_amount()  # Data type: float
+            if "last_drop_rate" in self.price_drop_percentage[trade.pair].keys():
+                last = self.price_drop_percentage[trade.pair].get("last_drop_rate")
+                if last is not None:
+                    if current_rate < last:
+                        self.price_drop_percentage[trade.pair]["last_drop_time"] = current_time
+                        self.price_drop_percentage[trade.pair]["last_drop_rate"] = current_rate
 
-                                        # Calculating the amount for the next bet using DCA (Dollar Cost Averaging)
-                                        calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                                        decline=current_profit * 100,
-                                                                                        target_percent=1)  # Data type: float
-                                        # Adjusting the bet size if it is higher than the available balance
-                                        while calculated_dca_stake >= total_stake_amount:
-                                            calculated_dca_stake = calculated_dca_stake / 4  # Data type: float
-                                        # Logging of adjusted bet information
-                                        if (log_level.value <= 1): logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-                                        # Returns the adjusted bet size
-                                        return calculated_dca_stake
-            # Returns None if conditions are not met to adjust the trade position
-            return None
+            # If a 5% drop has been recorded and it's been more than 3 hours since then
+            if self.price_drop_percentage[trade.pair].get("last_drop_time") > current_time:
+                time_since_last_drop = current_time - self.price_drop_percentage[trade.pair]["last_drop_time"]
+                if time_since_last_drop.total_seconds() / 3600 >= 3:
+                    logging.info(f"Locking {trade.pair}")
+                    self.lock_pair(trade.pair, until=datetime.now(timezone.utc) + timedelta(minutes=24 * 60))
+                    # self.locked.append(trade.pair)
+                    return None  # Avoid further DCA
+
+        last_buy_order = None
+        count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
+        for order in reversed(trade.orders):
+            if order.ft_order_side == 'buy' and order.status == 'closed':
+                last_buy_order = order
+                break
+
+        # Record the time when a 5% drop was first noted
+        if trade.pair not in self.price_drop_percentage:
+            self.price_drop_percentage[trade.pair] = {"last_drop_time": None, "last_drop_rate": None}
+
+        if self.max_safety_orders >= count_of_buys:
+            # Calculate the percentage difference between the last buy order and the current rate
+            pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
+                                                            current_price=current_rate)
+            # Check if the percentage difference is less than the threshold value
+            if pct_diff < pct_threshold:
+                if last_buy_order and current_rate < last_buy_order.price:
+                    # Check RSI conditions for DCA
+                    rsi_value = last_candle['rsi']  # Assuming RSI is part of the dataframe
+                    w_rsi = last_candle['weighted_rsi']  # Assuming weighted RSI is part of the dataframe
+                    if rsi_value <= w_rsi:
+                        # Log information about the store
+                        if (log_level.value <= 1): logging.info(
+                            f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                        # Get the total stake amount in the wallet
+                        total_stake_amount = self.wallets.get_total_stake_amount()
+                        # Calculate the amount for the next bet using DCA (Dollar Cost Averaging)
+                        calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                        decline=current_profit * 100,
+                                                                        target_percent=1)
+                        # Adjust the bet size if it is higher than the available balance
+                        while calculated_dca_stake >= total_stake_amount:
+                            calculated_dca_stake = calculated_dca_stake / 4
+                        # Log information about the adjusted bet
+                        if (log_level.value <= 1): logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                        # Return the adjusted bet size
+                        return calculated_dca_stake
+        # Return None if no conditions are met to adjust the trade position
+        return None
 
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
-        
+
         try:
             dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
             df = dataframe.copy()
@@ -738,12 +753,16 @@ class HPSDivergence(IStrategy):
         current_profit = trade.calc_profit_ratio(rate)
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
 
-        if 'psl' in exit_reason:
-            logging.info(f"CTE - PSL EXIT")
+        if current_profit >= 0.005 and 'psl' in exit_reason:
+            # logging.info(f"CTE - PSL EXIT: {pair}, {current_profit}, {rate}, {exit_reason}, {amount}")
             return True
 
         # Checking if the current high is higher than the open of the last candle
         last_candle = dataframe.iloc[-1]
+
+        if last_candle['doji_candle'] > 1:
+            return False
+
         if last_candle['high'] > last_candle['open']:
             # logging.info(f"CTE - Cena stále roste (high > open), HOLD")
             return False
@@ -776,7 +795,6 @@ class HPSDivergence(IStrategy):
         else:
             return False
 
-
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[:, 'exit_tag'] = ''
 
@@ -793,7 +811,6 @@ class HPSDivergence(IStrategy):
                     (dataframe['sma_50'].shift(1) > dataframe['sma_50'])
             ),
             'exit_long'] = 1
-
 
         dataframe.loc[
             (
@@ -814,7 +831,7 @@ class HPSDivergence(IStrategy):
 
         dataframe.loc[:, 'exit_short'] = 0
         return dataframe
-    
+
     def percentage_drop_indicator(self, dataframe, period, threshold=0.3):
         # Calculation of the highest price for the last period
         highest_high = dataframe['high'].rolling(period).max()
@@ -823,7 +840,7 @@ class HPSDivergence(IStrategy):
         dataframe.loc[percentage_drop < threshold, 'percentage_drop_buy'] = 1
         dataframe.loc[percentage_drop > threshold, 'percentage_drop_buy'] = 0
         return dataframe
-    
+
     def timeframe_to_minutes(self, timeframe):
         """Converts the timeframe to minutes."""
         if timeframe.endswith('m'):
