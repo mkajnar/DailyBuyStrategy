@@ -20,7 +20,6 @@ from freqtrade.enums.tradingmode import TradingMode
 from freqtrade.persistence import Trade, LocalTrade, Order
 from freqtrade.strategy import merge_informative_pair, DecimalParameter, IntParameter
 from freqtrade.strategy.interface import IStrategy
-from freqtrade import freqtradebot
 
 from modules.lambo2 import Lambo
 from modules.elliot import Elliot
@@ -46,9 +45,10 @@ class HPSDivergence(IStrategy):
     support_dict = {}
     resistance_dict = {}
 
-    timeframed_drops = {'1m': -0.02,
-                        '5m': -0.03,
+    timeframed_drops = {'1m': -0.01,
+                        '5m': -0.05,
                         '15m': -0.05,
+                        '30m': -0.075,
                         '1h': -0.1
                         }
 
@@ -56,7 +56,7 @@ class HPSDivergence(IStrategy):
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
-    # locked = []
+    locked = []
     pairs_close_to_high = []
 
     out_open_trades_limit = 10
@@ -199,7 +199,6 @@ class HPSDivergence(IStrategy):
 
     def version(self) -> str:
         return "HPDivergence v1.0"
-
 
     def pivot_points(self, high, low, period=10):
         pivot_high = high.rolling(window=2 * period + 1, center=True).max()
@@ -402,6 +401,7 @@ class HPSDivergence(IStrategy):
         dataframe['higher_tf_trend'] = dataframe['date'].map(resampled_frame['higher_tf_trend'])
 
         dataframe['doji_candle'] = (CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close']) > 0).astype(int)
+
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.dynamic_stop_loss_take_profit(dataframe=dataframe)
 
@@ -638,7 +638,7 @@ class HPSDivergence(IStrategy):
 
         # Update the current time to the current UTC time
         pct_threshold = self.timeframed_drops[self.timeframe]
-        # logging.info(f"Timeframe: {self.timeframe}, Pct Threshold: {pct_threshold}")
+        logging.info(f"Timeframe: {self.timeframe}, Pct Threshold: {pct_threshold}")
         current_time = datetime.utcnow()
 
         try:
@@ -648,6 +648,9 @@ class HPSDivergence(IStrategy):
         except Exception as e:
             # Log an error if there's an issue retrieving the dataframe and exit the method
             if (log_level.value <= 3): logging.error(f"Error getting analyzed dataframe: {e}")
+            return None
+
+        if trade.pair in self.locked:
             return None
 
         last_candle = df.iloc[-1]
@@ -683,7 +686,7 @@ class HPSDivergence(IStrategy):
                 if time_since_last_drop.total_seconds() / 3600 >= 3:
                     logging.info(f"Locking {trade.pair}")
                     self.lock_pair(trade.pair, until=datetime.now(timezone.utc) + timedelta(minutes=24 * 60))
-                    # self.locked.append(trade.pair)
+                    self.locked.append(trade.pair)
                     return None  # Avoid further DCA
 
         last_buy_order = None
@@ -754,14 +757,14 @@ class HPSDivergence(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
 
         if current_profit >= 0.005 and 'psl' in exit_reason:
-            # logging.info(f"CTE - PSL EXIT: {pair}, {current_profit}, {rate}, {exit_reason}, {amount}")
+            logging.info(f"CTE - PSL EXIT: {pair}, {current_profit}, {rate}, {exit_reason}, {amount}")
             return True
 
         # Checking if the current high is higher than the open of the last candle
         last_candle = dataframe.iloc[-1]
 
-        if last_candle['doji_candle'] > 1:
-            return False
+        # if last_candle['doji_candle'] > 1:
+        #     return False
 
         if last_candle['high'] > last_candle['open']:
             # logging.info(f"CTE - Cena stále roste (high > open), HOLD")
