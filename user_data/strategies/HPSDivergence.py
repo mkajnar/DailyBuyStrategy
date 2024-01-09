@@ -400,7 +400,8 @@ class HPSDivergence(IStrategy):
         resampled_frame['higher_tf_trend'] = resampled_frame['higher_tf_trend'].replace({1: 1, 0: -1})
         dataframe['higher_tf_trend'] = dataframe['date'].map(resampled_frame['higher_tf_trend'])
 
-        dataframe['doji_candle'] = (CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close']) > 0).astype(int)
+        dataframe['doji_candle'] = (
+                    CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close']) > 0).astype(int)
 
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.dynamic_stop_loss_take_profit(dataframe=dataframe)
@@ -488,8 +489,9 @@ class HPSDivergence(IStrategy):
         last_candle = dataframe.iloc[-1]
         if last_candle['doji_candle'] == 1:
             logging.info(f"Doji detected on {metadata['pair']}")
-            self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
-                minutes=self.timeframe_to_minutes(self.timeframe) * 10))
+            if not self.is_pair_locked(pair=metadata['pair']):
+                self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
+                    minutes=self.timeframe_to_minutes(self.timeframe) * 10))
             return dataframe
 
         # Lambo2
