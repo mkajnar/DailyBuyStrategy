@@ -112,16 +112,16 @@ class SRChartCandleStrat(IStrategy):
     support_dict = {}
     resistance_dict = {}
     out_open_trades_limit = 10
-    stoploss = -0.9
+    stoploss = -0.1
 
     trailing_stop = True
     trailing_stop_positive = 0.003
     trailing_stop_positive_offset = 0.008
-    trailing_only_offset_is_reached = True
+    trailing_only_offset_is_reached = False
 
     use_exit_signal = True
     exit_profit_only = False
-    ignore_roi_if_entry_signal = True
+    ignore_roi_if_entry_signal = False
     position_adjustment_enable = True
     order_time_in_force = {
         'entry': 'gtc',
@@ -532,13 +532,13 @@ class SRChartCandleStrat(IStrategy):
         #     logging.error(f"Error getting analyzed dataframe: {e}")
         #     return None
 
-        result = Trade.get_open_trade_count() < self.out_open_trades_limit
-        return result
-        pass
+        logging.info(f"confirm_trade_entry: {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
+
+        return Trade.get_open_trade_count() <= self.out_open_trades_limit
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                     current_profit: float, **kwargs):
-        if current_profit < -0.15 and (current_time - trade.open_date_utc).days >= 7:
+        if current_profit < -0.15 and (current_time - trade.open_date_utc).days >= 60:
             return 'unclog'
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -546,7 +546,7 @@ class SRChartCandleStrat(IStrategy):
                            current_time: datetime, **kwargs) -> bool:
         exit_reason = f"{exit_reason}_{trade.enter_tag}"
 
-        if 'unclog' in exit_reason or 'force' in exit_reason:
+        if 'unclog' in exit_reason or 'force' in exit_reason or 'stoploss' == exit_reason or 'stop-loss' == exit_reason:
             # logging.info(f"CTE - FORCE or UNCLOG, EXIT")
             return True
 
