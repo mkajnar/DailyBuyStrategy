@@ -56,7 +56,7 @@ class HPSDivergence(IStrategy):
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
-    locked = []
+    # locked = []
     pairs_close_to_high = []
 
     out_open_trades_limit = 10
@@ -259,7 +259,6 @@ class HPSDivergence(IStrategy):
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
-
         if 'enter_tag' not in dataframe.columns:
             dataframe.loc[:, 'enter_tag'] = ''
         if 'exit_tag' not in dataframe.columns:
@@ -268,7 +267,7 @@ class HPSDivergence(IStrategy):
             dataframe.loc[:, 'enter_long'] = 0
         if 'exit_long' not in dataframe.columns:
             dataframe.loc[:, 'exit_long'] = 0
-            
+
         dataframe['price_history'] = dataframe['close'].shift(1)
         data_last_bbars = dataframe[-30:].copy()
         low_min = dataframe['low'].rolling(window=14).min()
@@ -662,7 +661,7 @@ class HPSDivergence(IStrategy):
             if (log_level.value <= 3): logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        if trade.pair in self.locked:
+        if self.is_pair_locked(pair=trade.pair):
             return None
 
         last_candle = df.iloc[-1]
@@ -698,7 +697,7 @@ class HPSDivergence(IStrategy):
                 if time_since_last_drop.total_seconds() / 3600 >= 3:
                     logging.info(f"Locking {trade.pair}")
                     self.lock_pair(trade.pair, until=datetime.now(timezone.utc) + timedelta(minutes=24 * 60))
-                    self.locked.append(trade.pair)
+                    # self.locked.append(trade.pair)
                     return None  # Avoid further DCA
 
         last_buy_order = None
