@@ -120,7 +120,7 @@ class SRChartCandleStrat(IStrategy):
     trailing_only_offset_is_reached = True
 
     use_exit_signal = True
-    exit_profit_only = True
+    exit_profit_only = False
     ignore_roi_if_entry_signal = True
     position_adjustment_enable = True
     order_time_in_force = {
