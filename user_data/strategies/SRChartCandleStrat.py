@@ -7,7 +7,7 @@ from typing import Optional
 import numpy as np
 import talib.abstract as ta
 from pandas import DataFrame
-from talib import CDLDOJI
+from talib import CDLDOJI, MFI
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 from freqtrade.persistence import Trade
 from freqtrade.strategy import DecimalParameter, IntParameter
@@ -112,7 +112,7 @@ class SRChartCandleStrat(IStrategy):
     support_dict = {}
     resistance_dict = {}
     out_open_trades_limit = 10
-    stoploss = -0.1
+    stoploss = -0.2
 
     trailing_stop = True
     trailing_stop_positive = 0.003
@@ -121,7 +121,7 @@ class SRChartCandleStrat(IStrategy):
 
     use_exit_signal = True
     exit_profit_only = False
-    ignore_roi_if_entry_signal = False
+    ignore_roi_if_entry_signal = True
     position_adjustment_enable = True
     order_time_in_force = {
         'entry': 'gtc',
@@ -219,6 +219,17 @@ class SRChartCandleStrat(IStrategy):
 
     def version(self) -> str:
         return "SRChartCandleStrat v1.0"
+
+    # custom_info = {}
+    #
+    # def bot_loop_start(self, current_time: datetime, **kwargs) -> None:
+    #
+    #     for pair in list(self.custom_info):
+    #         if "unlock_me" in self.custom_info[pair]:
+    #             message = f"Found reverse position signal - unlocking {pair}"
+    #             self.dp.send_msg(message)
+    #             self.unlock_pair(pair)
+    #             del self.custom_info[pair]
 
     def dynamic_stop_loss_take_profit(self, dataframe: DataFrame) -> DataFrame:
         atr = ta.ATR(dataframe, timeperiod=14)
@@ -341,71 +352,73 @@ class SRChartCandleStrat(IStrategy):
         self.prepare_ewo(dataframe=dataframe)
         self.prepare_doji(dataframe=dataframe)
         self.prepare_fibs(dataframe=dataframe)
+        self.prepare_mfi(dataframe=dataframe)
+
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.elliot.populate_indicators(dataframe=dataframe)
         return dataframe
         pass
 
-    def populate_entry_trend_sr(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        # Checking the distance to support and resistance
-        if metadata['pair'] in self.support_dict and metadata['pair'] in self.resistance_dict:
-            supports = self.support_dict[metadata['pair']]
-            resistances = self.resistance_dict[metadata['pair']]
-
-            if supports and resistances:
-                # Calculating the nearest support and resistance level for each candle
-                dataframe['nearest_support'] = dataframe['close'].apply(
-                    lambda x: min([support for support in supports if support <= x], default=x,
-                                  key=lambda support: abs(x - support))
-                )
-                dataframe['nearest_resistance'] = dataframe['close'].apply(
-                    lambda x: min([resistance for resistance in resistances if resistance >= x], default=x,
-                                  key=lambda resistance: abs(x - resistance))
-                )
-
-                # Calculation of the percentage difference between the price and the nearest support/resistance
-                dataframe['distance_to_support_pct'] = (dataframe['nearest_support'] - dataframe['close']) / dataframe[
-                    'close'] * 100
-                dataframe['distance_to_resistance_pct'] = (dataframe['nearest_resistance'] - dataframe['close']) / \
-                                                          dataframe['close'] * 100
-
-                # Generating buy signals based on support and resistance
-                buy_threshold = 0.1  # 0.1 %
-                dataframe.loc[
-                    (dataframe['distance_to_support_pct'] >= 0) &
-                    (dataframe['distance_to_support_pct'] <= buy_threshold) &
-                    (dataframe['distance_to_resistance_pct'] >= buy_threshold),
-                    'buy_signal'
-                ] = 1
-
-                dataframe.loc[
-                    (dataframe['distance_to_support_pct'] >= 0) &
-                    (dataframe['distance_to_support_pct'] <= buy_threshold) &
-                    (dataframe['distance_to_resistance_pct'] >= buy_threshold),
-                    'enter_tag'
-                ] += 'sr_buy_mid'
-
-                # Remove helper columns
-                dataframe.drop(
-                    ['nearest_support', 'nearest_resistance', 'distance_to_support_pct', 'distance_to_resistance_pct'],
-                    axis=1, inplace=True)
-
-        # Adding conditions for EMA and volume
-        dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
-        dataframe.loc[
-            (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'enter_tag'] += 'ema_dbs_'
-
-        # Generating buy signals only if both conditions are met
-        dataframe.loc[(dataframe['buy_signal'] == 1) & (dataframe['buy_ema'] == 1) & (
-                dataframe['rsi'] <= dataframe['weighted_rsi']), 'enter_long'] = 1
-
-        # Remove helper columns
-        if 'buy_support' in dataframe.columns:
-            dataframe.drop(['buy_support'], axis=1, inplace=True)
-        if 'buy_ema' in dataframe.columns:
-            dataframe.drop(['buy_ema'], axis=1, inplace=True)
-
-        return dataframe
+    # def populate_entry_trend_sr(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    #     # Checking the distance to support and resistance
+    #     if metadata['pair'] in self.support_dict and metadata['pair'] in self.resistance_dict:
+    #         supports = self.support_dict[metadata['pair']]
+    #         resistances = self.resistance_dict[metadata['pair']]
+    #
+    #         if supports and resistances:
+    #             # Calculating the nearest support and resistance level for each candle
+    #             dataframe['nearest_support'] = dataframe['close'].apply(
+    #                 lambda x: min([support for support in supports if support <= x], default=x,
+    #                               key=lambda support: abs(x - support))
+    #             )
+    #             dataframe['nearest_resistance'] = dataframe['close'].apply(
+    #                 lambda x: min([resistance for resistance in resistances if resistance >= x], default=x,
+    #                               key=lambda resistance: abs(x - resistance))
+    #             )
+    #
+    #             # Calculation of the percentage difference between the price and the nearest support/resistance
+    #             dataframe['distance_to_support_pct'] = (dataframe['nearest_support'] - dataframe['close']) / dataframe[
+    #                 'close'] * 100
+    #             dataframe['distance_to_resistance_pct'] = (dataframe['nearest_resistance'] - dataframe['close']) / \
+    #                                                       dataframe['close'] * 100
+    #
+    #             # Generating buy signals based on support and resistance
+    #             buy_threshold = 0.1  # 0.1 %
+    #             dataframe.loc[
+    #                 (dataframe['distance_to_support_pct'] >= 0) &
+    #                 (dataframe['distance_to_support_pct'] <= buy_threshold) &
+    #                 (dataframe['distance_to_resistance_pct'] >= buy_threshold),
+    #                 'buy_signal'
+    #             ] = 1
+    #
+    #             dataframe.loc[
+    #                 (dataframe['distance_to_support_pct'] >= 0) &
+    #                 (dataframe['distance_to_support_pct'] <= buy_threshold) &
+    #                 (dataframe['distance_to_resistance_pct'] >= buy_threshold),
+    #                 'enter_tag'
+    #             ] += 'sr_buy_mid'
+    #
+    #             # Remove helper columns
+    #             dataframe.drop(
+    #                 ['nearest_support', 'nearest_resistance', 'distance_to_support_pct', 'distance_to_resistance_pct'],
+    #                 axis=1, inplace=True)
+    #
+    #     # Adding conditions for EMA and volume
+    #     dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
+    #     dataframe.loc[
+    #         (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'enter_tag'] += 'ema_dbs_'
+    #
+    #     # Generating buy signals only if both conditions are met
+    #     dataframe.loc[(dataframe['buy_signal'] == 1) & (dataframe['buy_ema'] == 1) & (
+    #             dataframe['rsi'] <= dataframe['weighted_rsi']), 'enter_long'] = 1
+    #
+    #     # Remove helper columns
+    #     if 'buy_support' in dataframe.columns:
+    #         dataframe.drop(['buy_support'], axis=1, inplace=True)
+    #     if 'buy_ema' in dataframe.columns:
+    #         dataframe.drop(['buy_ema'], axis=1, inplace=True)
+    #
+    #     return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
@@ -420,13 +433,16 @@ class SRChartCandleStrat(IStrategy):
                         minutes=self.timeframe_to_minutes(self.timeframe) * 14), reason='DOJI_LOCK')
                 return dataframe
 
+            dataframe.loc[(dataframe['mfi_buy'].rolling(window=5).min() > 0), 'enter_tag'] += 'mfi_buy_'
+            dataframe.loc[(dataframe['mfi_buy'].rolling(window=5).min() > 0), 'enter_long'] = 1
+
             # Elliot Waves
-            (dataframe, conditions) = self.elliot.populate_entry_trend_v1(dataframe, conditions)
+            # (dataframe, conditions) = self.elliot.populate_entry_trend_v1(dataframe, conditions)
             (dataframe, conditions) = self.elliot.populate_entry_trend_v2(dataframe, conditions)
             (dataframe, conditions) = self.elliot.populate_entry_trend_cofi(dataframe, conditions)
 
             # Checking the distance to the nearest resistance
-            dataframe = self.populate_entry_trend_sr(dataframe=dataframe, metadata=metadata)
+            # dataframe = self.populate_entry_trend_sr(dataframe=dataframe, metadata=metadata)
 
             # Checking the distance to the support
             if metadata['pair'] in self.support_dict:
@@ -491,6 +507,10 @@ class SRChartCandleStrat(IStrategy):
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
+        dataframe.loc[(dataframe['mfi_sell'].rolling(window=5).min() > 0), 'exit_tag'] += 'mfi_sell_'
+        dataframe.loc[(dataframe['mfi_sell'].rolling(window=5).min() > 0), 'exit_long'] = 1
+
         dataframe.loc[
             (
                     (dataframe['close'] > dataframe['fib_618']) &
@@ -532,7 +552,8 @@ class SRChartCandleStrat(IStrategy):
         #     logging.error(f"Error getting analyzed dataframe: {e}")
         #     return None
 
-        logging.info(f"confirm_trade_entry: {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
+        logging.info(
+            f"confirm_trade_entry: {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
 
         return Trade.get_open_trade_count() <= self.out_open_trades_limit
 
@@ -545,6 +566,19 @@ class SRChartCandleStrat(IStrategy):
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
         exit_reason = f"{exit_reason}_{trade.enter_tag}"
+
+        # dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+        # last_candle = dataframe.iloc[-1].squeeze()
+        # if trade.is_short:
+        #     if last_candle['enter_long'] == 1:
+        #         if not pair in self.custom_info:
+        #             self.custom_info[pair] = {}
+        #         self.custom_info[pair]["unlock_me"] = True
+        # else:
+        #     if last_candle['enter_short'] == 1:
+        #         if not pair in self.custom_info:
+        #             self.custom_info[pair] = {}
+        #         self.custom_info[pair]["unlock_me"] = True
 
         if 'unclog' in exit_reason or 'force' in exit_reason or 'stoploss' == exit_reason or 'stop-loss' == exit_reason:
             # logging.info(f"CTE - FORCE or UNCLOG, EXIT")
@@ -751,4 +785,13 @@ class SRChartCandleStrat(IStrategy):
 
     def prepare_adx(self, dataframe):
         dataframe['adx'] = ta.ADX(dataframe)
+        pass
+
+    def prepare_mfi(self, dataframe):
+        mfi_period = 14
+        mfi = MFI(dataframe['high'], dataframe['low'], dataframe['close'], dataframe['volume'], timeperiod=mfi_period)
+        overbought_threshold = 80
+        oversold_threshold = 20
+        dataframe['mfi_buy'] = (mfi < oversold_threshold).astype(int)
+        dataframe['mfi_sell'] = (mfi > overbought_threshold).astype(int)
         pass
