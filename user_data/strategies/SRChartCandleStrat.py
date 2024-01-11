@@ -165,6 +165,8 @@ class SRChartCandleStrat(IStrategy):
     }
 
     elliot = Elliot()
+
+    mfi_buy_treshold = IntParameter(1, 15, default=5, space='buy', optimize=True)
     base_nb_candles_sell = IntParameter(8, 20, default=elliot.base_nb_candles_sell, space='sell', optimize=False)
     base_nb_candles_buy = IntParameter(8, 20, default=elliot.base_nb_candles_buy, space='buy', optimize=False)
     low_offset = DecimalParameter(0.975, 0.995, default=elliot.low_offset, space='buy', optimize=True)
@@ -231,10 +233,26 @@ class SRChartCandleStrat(IStrategy):
     #             self.unlock_pair(pair)
     #             del self.custom_info[pair]
 
+    def detect_hammer_doji(self, dataframe: DataFrame):
+        # Přidání logiky pro detekci Hammer a Doji svíček
+        hammer = ta.CDLHAMMER(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close'])
+        doji = ta.CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close'])
+        dataframe['is_hammer'] = (hammer > 0)
+        dataframe['is_doji'] = (doji > 0)
+        return dataframe
+
     def dynamic_stop_loss_take_profit(self, dataframe: DataFrame) -> DataFrame:
         atr = ta.ATR(dataframe, timeperiod=14)
-        dataframe['stop_loss'] = dataframe['low'].shift(1) - atr.shift(1) * 0.8
-        dataframe['take_profit'] = dataframe['high'].shift(1) + atr.shift(1) * 2.5
+        dataframe = self.detect_hammer_doji(dataframe)
+        for i in range(1, len(dataframe)):
+            row = dataframe.iloc[i]
+            prev_row = dataframe.iloc[i - 1]
+            if row['is_hammer'] or row['is_doji']:
+                dataframe.at[i, 'stop_loss'] = prev_row['low'] - atr.iloc[i] * 0.5
+                dataframe.at[i, 'take_profit'] = prev_row['high'] + atr.iloc[i] * 3
+            else:
+                dataframe.at[i, 'stop_loss'] = prev_row['low'] - atr.iloc[i] * 0.8
+                dataframe.at[i, 'take_profit'] = prev_row['high'] + atr.iloc[i] * 2.5
         return dataframe
 
     def calculate_dca_price(self, base_value, decline, target_percent):
@@ -426,15 +444,20 @@ class SRChartCandleStrat(IStrategy):
         if dataframe is not None:
 
             last_candle = dataframe.iloc[-1]
-            if last_candle['doji_candle'] == 1:
-                logging.info(f"Doji detected on {metadata['pair']}")
+            if last_candle['doji_candle'] > 0 and last_candle['lock_pair'] > 0:
+                logging.info(f"Doji detected on {metadata['pair']} with lock")
                 if not self.is_pair_locked(pair=metadata['pair']):
                     self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
                         minutes=self.timeframe_to_minutes(self.timeframe) * 14), reason='DOJI_LOCK')
-                return dataframe
+                    return dataframe
 
-            dataframe.loc[(dataframe['mfi_buy'].rolling(window=5).min() > 0), 'enter_tag'] += 'mfi_buy_'
-            dataframe.loc[(dataframe['mfi_buy'].rolling(window=5).min() > 0), 'enter_long'] = 1
+            if last_candle['doji_candle'] > 0 and last_candle['unlock_pair'] > 0:
+                logging.info(f"Doji detected on {metadata['pair']} with unlock")
+                if self.is_pair_locked(pair=metadata['pair']):
+                    self.unlock_pair(pair=metadata['pair'])
+
+            dataframe.loc[(dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_tag'] += 'mfi_buy_'
+            dataframe.loc[(dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_long'] = 1
 
             # Elliot Waves
             # (dataframe, conditions) = self.elliot.populate_entry_trend_v1(dataframe, conditions)
@@ -508,8 +531,8 @@ class SRChartCandleStrat(IStrategy):
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
-        dataframe.loc[(dataframe['mfi_sell'].rolling(window=5).min() > 0), 'exit_tag'] += 'mfi_sell_'
-        dataframe.loc[(dataframe['mfi_sell'].rolling(window=5).min() > 0), 'exit_long'] = 1
+        dataframe.loc[(dataframe['mfi_sell'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'exit_tag'] += 'mfi_sell_'
+        dataframe.loc[(dataframe['mfi_sell'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'exit_long'] = 1
 
         dataframe.loc[
             (
@@ -713,6 +736,22 @@ class SRChartCandleStrat(IStrategy):
     def prepare_doji(self, dataframe):
         dataframe['doji_candle'] = (
                 CDLDOJI(dataframe['open'], dataframe['high'], dataframe['low'], dataframe['close']) > 0).astype(int)
+
+        # DOJI Candle Logic
+        dataframe['upper_shadow'] = dataframe['high'] - np.maximum(dataframe['open'], dataframe['close'])
+        dataframe['lower_shadow'] = np.minimum(dataframe['open'], dataframe['close']) - dataframe['low']
+        is_doji = dataframe['doji_candle'] == 1
+
+        # Condition for longer lower shadow in DOJI
+        condition_longer_lower_shadow = (dataframe['lower_shadow'] > dataframe['upper_shadow']) & is_doji
+
+        # Condition for longer upper shadow in DOJI
+        condition_longer_upper_shadow = (dataframe['upper_shadow'] > dataframe['lower_shadow']) & is_doji
+
+        # Implementing the DOJI logic for locking/unlocking or allowing buying
+        # dataframe.loc[condition_longer_upper_shadow, 'enter_tag'] += 'doji_longer_upper_'
+        dataframe.loc[condition_longer_upper_shadow, 'lock_pair'] = 1  # This will mark the pair to be locked
+        dataframe.loc[condition_longer_lower_shadow, 'unlock_pair'] = 1
         pass
 
     def calculate_support_resistance_dicts(self, pair: str, df: DataFrame):
