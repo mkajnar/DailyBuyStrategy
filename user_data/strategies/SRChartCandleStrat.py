@@ -153,7 +153,11 @@ class SRChartCandleStrat(IStrategy):
         '5m': -0.05,
         '15m': -0.05,
         '30m': -0.075,
-        '1h': -0.1
+        '1h': -0.1,
+        '2h': -0.1,
+        '4h': -0.1,
+        '8h': -0.1,
+        '1d': -0.1
     }
     timeframes_in_minutes = {
         '1m': 1,
@@ -784,22 +788,25 @@ class SRChartCandleStrat(IStrategy):
             else:
                 dataframe['trend'] = 'downtrend'
         except Exception as ex:
-            logging.error(str(ex))
+            # logging.error(str(ex))
+            pass
 
     def get_max_drawdown(self, dataframe):
         t = self.downtrend_pct_treshold.value
-        dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
         try:
+            s = self.timeframed_drops.get(self.timeframe, '1h') * t
+            dataframe['max_drawdown'] = s
             df = dataframe[-200:]
             cumulative_max = df['close'].cummax()
             if cumulative_max:
                 drawdowns = (df['close'] - cumulative_max) / cumulative_max
                 max_drawdown = drawdowns.min()
-                if -max_drawdown > self.timeframed_drops[self.timeframe]:
-                    dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
+                if -max_drawdown > self.timeframed_drops.get(self.timeframe, '1h'):
+                    dataframe['max_drawdown'] = s
                 else:
                     dataframe['max_drawdown'] = -max_drawdown * t
             else:
-                dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
+                dataframe['max_drawdown'] = s
         except Exception as ex:
-            logging.error(str(ex))
+            # logging.error(str(ex))
+            pass
