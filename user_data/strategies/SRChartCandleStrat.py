@@ -352,6 +352,7 @@ class SRChartCandleStrat(IStrategy):
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.elliot.populate_indicators(dataframe=dataframe)
         self.detect_trend(dataframe=dataframe)
+        self.get_max_drawdown(dataframe=dataframe)
         return dataframe
         pass
 
@@ -769,24 +770,34 @@ class SRChartCandleStrat(IStrategy):
         pass
 
     def detect_trend(self, dataframe):
-        x = self.downtrend_max_candles.value
-        t = self.downtrend_pct_treshold.value
-        aggregated_candle = {
-            'open': dataframe['open'].iloc[-x],
-            'high': dataframe['high'].iloc[-x:].max(),
-            'low': dataframe['low'].iloc[-x:].min(),
-            'close': dataframe['close'].iloc[-1]
-        }
-        if aggregated_candle['close'] > aggregated_candle['open']:
-            dataframe['trend'] = 'uptrend'
-        else:
-            dataframe['trend'] = 'downtrend'
+        try:
+            x = self.downtrend_max_candles.value
+            aggregated_candle = {
+                'open': dataframe['open'].iloc[-x],
+                'high': dataframe['high'].iloc[-x:].max(),
+                'low': dataframe['low'].iloc[-x:].min(),
+                'close': dataframe['close'].iloc[-1]
+            }
+            if aggregated_candle['close'] > aggregated_candle['open']:
+                dataframe['trend'] = 'uptrend'
+            else:
+                dataframe['trend'] = 'downtrend'
+        except Exception as ex:
+            logging.error(str(ex))
 
-        df = dataframe[-200:]
-        cumulative_max = df['close'].cummax()
-        drawdowns = (df['close'] - cumulative_max) / cumulative_max
-        max_drawdown = drawdowns.min()
-        if -max_drawdown > self.timeframed_drops[self.timeframe]:
-            dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
-        else:
-            dataframe['max_drawdown'] = -max_drawdown * t
+    def get_max_drawdown(self, dataframe):
+        try:
+            t = self.downtrend_pct_treshold.value
+            df = dataframe[-200:]
+            cumulative_max = df['close'].cummax()
+            if cumulative_max:
+                drawdowns = (df['close'] - cumulative_max) / cumulative_max
+                max_drawdown = drawdowns.min()
+                if -max_drawdown > self.timeframed_drops[self.timeframe]:
+                    dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
+                else:
+                    dataframe['max_drawdown'] = -max_drawdown * t
+            else:
+                dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
+        except Exception as ex:
+            logging.error(str(ex))
