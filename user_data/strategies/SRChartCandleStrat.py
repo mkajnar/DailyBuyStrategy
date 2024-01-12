@@ -290,10 +290,10 @@ class SRChartCandleStrat(IStrategy):
             return None
 
         last_candle = df.iloc[-1]
+        pct_threshold = last_candle['max_drawdown']
 
         if last_candle['trend'] == 'downtrend':
             total_stake_amount = self.wallets.get_total_stake_amount()
-            pct_threshold = last_candle['max_drawdown']
 
             if total_stake_amount <= 0:
                 return self.calculate_release_percentage(pair=trade.pair, current_rate=current_rate,
