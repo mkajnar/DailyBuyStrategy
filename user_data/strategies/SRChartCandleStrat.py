@@ -108,6 +108,7 @@ class SRChartCandleStrat(IStrategy):
     lowest_prices = {}
     highest_prices = {}
     price_drop_percentage = {}
+    last_dca = {}
     pairs_close_to_high = []
     support_dict = {}
     resistance_dict = {}
@@ -166,6 +167,8 @@ class SRChartCandleStrat(IStrategy):
 
     elliot = Elliot()
 
+    downtrend_max_candles = IntParameter(5, 30, default=10, space='buy', optimize=False)
+    downtrend_pct_treshold = DecimalParameter(0.5, 5, default=0.75, space='buy', optimize=False)
     mfi_buy_treshold = IntParameter(1, 15, default=5, space='buy', optimize=True)
     base_nb_candles_sell = IntParameter(8, 20, default=elliot.base_nb_candles_sell, space='sell', optimize=False)
     base_nb_candles_buy = IntParameter(8, 20, default=elliot.base_nb_candles_buy, space='buy', optimize=False)
@@ -258,18 +261,25 @@ class SRChartCandleStrat(IStrategy):
     def calculate_dca_price(self, base_value, decline, target_percent):
         return (((base_value / 100) * abs(decline)) / target_percent) * 100
 
+    def calculate_release_percentage(self, pair, current_rate, open_rate, stake_amount, pct_threshold,
+                                     release_percentage):
+        price_loss = (open_rate - current_rate) / open_rate
+        if price_loss > pct_threshold:
+            amount_to_release = stake_amount * -release_percentage
+            for_free = amount_to_release if abs(amount_to_release) <= stake_amount else -stake_amount
+            logging.info(f"Adjusting trade - free {for_free} from {pair}")
+            return for_free
+        return 0
+
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float, min_stake: float,
                               max_stake: float, **kwargs):
 
-        if current_rate is None:
+        if current_rate is None or self.is_pair_locked(pair=trade.pair):
+            logging.info(f"Skipping adjust_trade_position for {trade.pair} - pair is locked")
             return None
 
-        # Update the current time to the current UTC time
-        pct_threshold = self.timeframed_drops[self.timeframe]
-        # logging.info(f"Timeframe: {self.timeframe}, Pct Threshold: {pct_threshold}")
         current_time = datetime.utcnow()
-
         try:
             # Get an analyzed dataframe for the specified trading pair and timeframe
             dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
@@ -279,85 +289,54 @@ class SRChartCandleStrat(IStrategy):
             logging.error(f"Error getting analyzed dataframe: {e}")
             return None
 
-        if self.is_pair_locked(pair=trade.pair):
-            return None
-
         last_candle = df.iloc[-1]
 
-        # Initialize the lowest price for the trade pair if it's not already set
-        if trade.pair not in self.lowest_prices:
-            self.lowest_prices[trade.pair] = trade.open_rate
+        # if last_candle['trend'] == 'downtrend':
+        #     logging.info(f"Skipping adjust_trade_position for {trade.pair} - price is still in downtrend")
+        #     return None
 
-        if trade.pair not in self.price_drop_percentage:
-            self.price_drop_percentage[trade.pair] = {"last_drop_time": current_time, "last_drop_rate": current_rate}
+        total_stake_amount = self.wallets.get_total_stake_amount()
+        pct_threshold = last_candle['max_drawdown']
 
-        # Update the lowest price if the current rate is lower
-        if current_rate < self.lowest_prices[trade.pair]:
-            self.lowest_prices[trade.pair] = current_rate
+        if total_stake_amount <= 0:
+            return self.calculate_release_percentage(pair=trade.pair, current_rate=current_rate,
+                                                     open_rate=trade.open_rate,
+                                                     stake_amount=trade.stake_amount, pct_threshold=pct_threshold,
+                                                     release_percentage=0.15)
 
-        # Calculate the percentage drop from the opening rate
-        price_drop = (self.lowest_prices[trade.pair] - trade.open_rate) / trade.open_rate
-
-        # Record the time if the price drop exceeds 5%
-        if ((price_drop <= pct_threshold)
-                and (self.price_drop_percentage[trade.pair].get("last_drop_time", current_time) != current_time)):
-
-            if "last_drop_rate" in self.price_drop_percentage[trade.pair].keys():
-                last = self.price_drop_percentage[trade.pair].get("last_drop_rate")
-                if last is not None:
-                    if current_rate < last:
-                        self.price_drop_percentage[trade.pair]["last_drop_time"] = current_time
-                        self.price_drop_percentage[trade.pair]["last_drop_rate"] = current_rate
-
-            # If a 5% drop has been recorded and it's been more than 3 hours since then
-            if self.price_drop_percentage[trade.pair].get("last_drop_time") > current_time:
-                time_since_last_drop = current_time - self.price_drop_percentage[trade.pair]["last_drop_time"]
-                if time_since_last_drop.total_seconds() / 3600 >= 3:
-                    logging.info(f"Locking {trade.pair}")
-                    self.lock_pair(trade.pair, until=datetime.now(timezone.utc) + timedelta(
-                        minutes=8 * 60), reason='STILLDROP_LOCK')
-                    # self.locked.append(trade.pair)
-                    return None  # Avoid further DCA
-
-        last_buy_order = None
         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
-        for order in reversed(trade.orders):
-            if order.ft_order_side == 'buy' and order.status == 'closed':
-                last_buy_order = order
-                break
-
-        # Record the time when a 5% drop was first noted
-        if trade.pair not in self.price_drop_percentage:
-            self.price_drop_percentage[trade.pair] = {"last_drop_time": None, "last_drop_rate": None}
-
-        if self.max_safety_orders >= count_of_buys:
-            # Calculate the percentage difference between the last buy order and the current rate
+        if count_of_buys <= self.max_safety_orders:
+            last_buy_order = None
+            for order in reversed(trade.orders):
+                if order.ft_order_side == 'buy' and order.status == 'closed':
+                    last_buy_order = order
+                    break
             pct_diff = self.calculate_percentage_difference(original_price=last_buy_order.price,
                                                             current_price=current_rate)
-            # Check if the percentage difference is less than the threshold value
-            if pct_diff < pct_threshold:
+            logging.info(f"Price Drop: {pct_diff}, pct_threshold: {pct_threshold}")
+
+            if pct_diff <= pct_threshold:
                 if last_buy_order and current_rate < last_buy_order.price:
-                    # Check RSI conditions for DCA
-                    rsi_value = last_candle['rsi']  # Assuming RSI is part of the dataframe
-                    w_rsi = last_candle['weighted_rsi']  # Assuming weighted RSI is part of the dataframe
-                    if rsi_value <= w_rsi:
-                        # Log information about the store
-                        # logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
-                        # Get the total stake amount in the wallet
-                        total_stake_amount = self.wallets.get_total_stake_amount()
-                        # Calculate the amount for the next bet using DCA (Dollar Cost Averaging)
-                        calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
-                                                                        decline=current_profit * 100,
-                                                                        target_percent=1)
-                        # Adjust the bet size if it is higher than the available balance
-                        while calculated_dca_stake >= total_stake_amount:
-                            calculated_dca_stake = calculated_dca_stake / 4
-                        # Log information about the adjusted bet
-                        # logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
-                        # Return the adjusted bet size
+                    # rsi_value = last_candle['rsi']
+                    # w_rsi = last_candle['weighted_rsi']
+                    # if rsi_value <= w_rsi:
+                    logging.info(f'AP1 {trade.pair}, Profit: {current_profit}, Stake {trade.stake_amount}')
+                    total_stake_amount = self.wallets.get_total_stake_amount()
+                    calculated_dca_stake = self.calculate_dca_price(base_value=trade.stake_amount,
+                                                                    decline=current_profit * 100,
+                                                                    target_percent=1)
+                    while calculated_dca_stake >= total_stake_amount:
+                        calculated_dca_stake = calculated_dca_stake / 4
+                    logging.info(f'AP2 {trade.pair}, DCA: {calculated_dca_stake}')
+                    last_dca = self.last_dca.get(trade.pair, None)
+                    if ((last_dca is None)
+                            or (last_dca + timedelta(
+                                minutes=self.timeframe_to_minutes(self.timeframe) * 60) <= datetime.now())):
+                        self.last_dca[trade.pair] = datetime.now()
                         return calculated_dca_stake
-        # Return None if no conditions are met to adjust the trade position
-        return None
+                    else:
+                        return 0
+        return 0
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         self.prepare(dataframe=dataframe)
@@ -374,69 +353,9 @@ class SRChartCandleStrat(IStrategy):
 
         self.calculate_support_resistance_dicts(metadata['pair'], dataframe)
         dataframe = self.elliot.populate_indicators(dataframe=dataframe)
+        self.detect_trend(dataframe=dataframe)
         return dataframe
         pass
-
-    # def populate_entry_trend_sr(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-    #     # Checking the distance to support and resistance
-    #     if metadata['pair'] in self.support_dict and metadata['pair'] in self.resistance_dict:
-    #         supports = self.support_dict[metadata['pair']]
-    #         resistances = self.resistance_dict[metadata['pair']]
-    #
-    #         if supports and resistances:
-    #             # Calculating the nearest support and resistance level for each candle
-    #             dataframe['nearest_support'] = dataframe['close'].apply(
-    #                 lambda x: min([support for support in supports if support <= x], default=x,
-    #                               key=lambda support: abs(x - support))
-    #             )
-    #             dataframe['nearest_resistance'] = dataframe['close'].apply(
-    #                 lambda x: min([resistance for resistance in resistances if resistance >= x], default=x,
-    #                               key=lambda resistance: abs(x - resistance))
-    #             )
-    #
-    #             # Calculation of the percentage difference between the price and the nearest support/resistance
-    #             dataframe['distance_to_support_pct'] = (dataframe['nearest_support'] - dataframe['close']) / dataframe[
-    #                 'close'] * 100
-    #             dataframe['distance_to_resistance_pct'] = (dataframe['nearest_resistance'] - dataframe['close']) / \
-    #                                                       dataframe['close'] * 100
-    #
-    #             # Generating buy signals based on support and resistance
-    #             buy_threshold = 0.1  # 0.1 %
-    #             dataframe.loc[
-    #                 (dataframe['distance_to_support_pct'] >= 0) &
-    #                 (dataframe['distance_to_support_pct'] <= buy_threshold) &
-    #                 (dataframe['distance_to_resistance_pct'] >= buy_threshold),
-    #                 'buy_signal'
-    #             ] = 1
-    #
-    #             dataframe.loc[
-    #                 (dataframe['distance_to_support_pct'] >= 0) &
-    #                 (dataframe['distance_to_support_pct'] <= buy_threshold) &
-    #                 (dataframe['distance_to_resistance_pct'] >= buy_threshold),
-    #                 'enter_tag'
-    #             ] += 'sr_buy_mid'
-    #
-    #             # Remove helper columns
-    #             dataframe.drop(
-    #                 ['nearest_support', 'nearest_resistance', 'distance_to_support_pct', 'distance_to_resistance_pct'],
-    #                 axis=1, inplace=True)
-    #
-    #     # Adding conditions for EMA and volume
-    #     dataframe.loc[(dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'buy_ema'] = 1
-    #     dataframe.loc[
-    #         (dataframe['volume'] > 0) & (dataframe['ema_diff_buy_signal'].astype(int) > 0), 'enter_tag'] += 'ema_dbs_'
-    #
-    #     # Generating buy signals only if both conditions are met
-    #     dataframe.loc[(dataframe['buy_signal'] == 1) & (dataframe['buy_ema'] == 1) & (
-    #             dataframe['rsi'] <= dataframe['weighted_rsi']), 'enter_long'] = 1
-    #
-    #     # Remove helper columns
-    #     if 'buy_support' in dataframe.columns:
-    #         dataframe.drop(['buy_support'], axis=1, inplace=True)
-    #     if 'buy_ema' in dataframe.columns:
-    #         dataframe.drop(['buy_ema'], axis=1, inplace=True)
-    #
-    #     return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         conditions = []
@@ -444,20 +363,22 @@ class SRChartCandleStrat(IStrategy):
         if dataframe is not None:
 
             last_candle = dataframe.iloc[-1]
-            if last_candle['doji_candle'] > 0 and last_candle['lock_pair'] > 0:
-                logging.info(f"Doji detected on {metadata['pair']} with lock")
-                if not self.is_pair_locked(pair=metadata['pair']):
-                    self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
-                        minutes=self.timeframe_to_minutes(self.timeframe) * 14), reason='DOJI_LOCK')
-                    return dataframe
+            # if last_candle['doji_candle'] > 0 and last_candle['lock_pair'] > 0:
+            #     logging.info(f"Doji detected on {metadata['pair']} with lock")
+            #     if not self.is_pair_locked(pair=metadata['pair']):
+            #         self.lock_pair(pair=metadata['pair'], until=datetime.now(timezone.utc) + timedelta(
+            #             minutes=self.timeframe_to_minutes(self.timeframe) * 14), reason='DOJI_LOCK')
+            #         return dataframe
+            #
+            # if last_candle['doji_candle'] > 0 and last_candle['unlock_pair'] > 0:
+            #     logging.info(f"Doji detected on {metadata['pair']} with unlock")
+            #     if self.is_pair_locked(pair=metadata['pair']):
+            #         self.unlock_pair(pair=metadata['pair'])
 
-            if last_candle['doji_candle'] > 0 and last_candle['unlock_pair'] > 0:
-                logging.info(f"Doji detected on {metadata['pair']} with unlock")
-                if self.is_pair_locked(pair=metadata['pair']):
-                    self.unlock_pair(pair=metadata['pair'])
-
-            dataframe.loc[(dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_tag'] += 'mfi_buy_'
-            dataframe.loc[(dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_long'] = 1
+            dataframe.loc[
+                (dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_tag'] += 'mfi_buy_'
+            dataframe.loc[
+                (dataframe['mfi_buy'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'enter_long'] = 1
 
             # Elliot Waves
             # (dataframe, conditions) = self.elliot.populate_entry_trend_v1(dataframe, conditions)
@@ -517,7 +438,8 @@ class SRChartCandleStrat(IStrategy):
                 dataframe.drop(['buy_ema'], axis=1, inplace=True)
 
             dont_buy_conditions = [
-                (dataframe['enter_long'].shift(1) == 1 & (dataframe['sma_2'].shift(1) < dataframe['sma_2']))
+                (dataframe['enter_long'].shift(1) == 1 & (dataframe['sma_2'].shift(1) < dataframe['sma_2'])) |
+                (dataframe['trend'] == 'downtrend')
             ]
 
             if conditions:
@@ -531,7 +453,8 @@ class SRChartCandleStrat(IStrategy):
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
 
-        dataframe.loc[(dataframe['mfi_sell'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'exit_tag'] += 'mfi_sell_'
+        dataframe.loc[
+            (dataframe['mfi_sell'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'exit_tag'] += 'mfi_sell_'
         dataframe.loc[(dataframe['mfi_sell'].rolling(window=self.mfi_buy_treshold.value).min() > 0), 'exit_long'] = 1
 
         dataframe.loc[
@@ -574,10 +497,22 @@ class SRChartCandleStrat(IStrategy):
         # except Exception as e:
         #     logging.error(f"Error getting analyzed dataframe: {e}")
         #     return None
+        #
+        # last_candle = df.iloc[-1]
+        # if last_candle['trend'] == 'downtrend':
+        #     logging.info(f"Skipping confirm_trade_entry for {pair} - price is still in downtrend")
+        #     return False
 
         logging.info(
             f"confirm_trade_entry: {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
-
+        # t = Trade.get_open_trade_count() <= self.out_open_trades_limit
+        # if t:
+        #     if not self.is_pair_locked(pair=pair):
+        #         self.lock_pair(pair=pair, reason='ENTRY_COOLDOWN',
+        #                        until=datetime.now(timezone.utc) + timedelta(
+        #                            minutes=self.timeframe_to_minutes(self.timeframe) * 1))
+        #     logging.info(
+        #         f"Locked pair {pair} after buying until {datetime.now(timezone.utc) + timedelta(minutes=self.timeframe_to_minutes(self.timeframe) * 5)}")
         return Trade.get_open_trade_count() <= self.out_open_trades_limit
 
     def custom_exit(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
@@ -639,18 +574,18 @@ class SRChartCandleStrat(IStrategy):
         # Calculation of percentage change between diff_current and diff_previous
         diff_change_pct = (diff_previous - diff_current) / diff_previous
 
-        if current_profit >= 0.0025:
-            if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
-                # logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
-                return True
-            elif ema_8_current > ema_14_current and diff_current > diff_previous:
-                # logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
-                return False
-            else:
-                # logging.info(f"CTE - Conditions not met, EXIT")
-                return True
-        else:
+        # if current_profit >= 0.0025:
+        if ema_8_current <= ema_14_current and diff_change_pct >= 0.025:
+            # logging.info(f"CTE - EMA 8 {ema_8_current} <= EMA 14 {ema_14_current} with decrease in difference >= 3%, EXIT")
+            return True
+        elif ema_8_current > ema_14_current and diff_current > diff_previous:
+            # logging.info(f"CTE - EMA 8 {ema_8_current} > EMA 14 {ema_14_current} with increasing difference, HOLD")
             return False
+        else:
+            # logging.info(f"CTE - Conditions not met, EXIT")
+            return True
+        # else:
+        #     return False
 
     pass
 
@@ -834,3 +769,26 @@ class SRChartCandleStrat(IStrategy):
         dataframe['mfi_buy'] = (mfi < oversold_threshold).astype(int)
         dataframe['mfi_sell'] = (mfi > overbought_threshold).astype(int)
         pass
+
+    def detect_trend(self, dataframe):
+        x = self.downtrend_max_candles.value
+        t = self.downtrend_pct_treshold.value
+        aggregated_candle = {
+            'open': dataframe['open'].iloc[-x],
+            'high': dataframe['high'].iloc[-x:].max(),
+            'low': dataframe['low'].iloc[-x:].min(),
+            'close': dataframe['close'].iloc[-1]
+        }
+        if aggregated_candle['close'] > aggregated_candle['open']:
+            dataframe['trend'] = 'uptrend'
+        else:
+            dataframe['trend'] = 'downtrend'
+
+        df = dataframe[-200:]
+        cumulative_max = df['close'].cummax()
+        drawdowns = (df['close'] - cumulative_max) / cumulative_max
+        max_drawdown = drawdowns.min()
+        if -max_drawdown > self.timeframed_drops[self.timeframe]:
+            dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
+        else:
+            dataframe['max_drawdown'] = -max_drawdown * t
