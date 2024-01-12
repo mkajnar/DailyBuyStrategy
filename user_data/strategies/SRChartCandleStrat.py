@@ -291,18 +291,16 @@ class SRChartCandleStrat(IStrategy):
 
         last_candle = df.iloc[-1]
 
-        # if last_candle['trend'] == 'downtrend':
-        #     logging.info(f"Skipping adjust_trade_position for {trade.pair} - price is still in downtrend")
-        #     return None
+        if last_candle['trend'] == 'downtrend':
+            total_stake_amount = self.wallets.get_total_stake_amount()
+            pct_threshold = last_candle['max_drawdown']
 
-        total_stake_amount = self.wallets.get_total_stake_amount()
-        pct_threshold = last_candle['max_drawdown']
-
-        if total_stake_amount <= 0:
-            return self.calculate_release_percentage(pair=trade.pair, current_rate=current_rate,
-                                                     open_rate=trade.open_rate,
-                                                     stake_amount=trade.stake_amount, pct_threshold=pct_threshold,
-                                                     release_percentage=0.15)
+            if total_stake_amount <= 0:
+                return self.calculate_release_percentage(pair=trade.pair, current_rate=current_rate,
+                                                         open_rate=trade.open_rate,
+                                                         stake_amount=trade.stake_amount, pct_threshold=pct_threshold,
+                                                         release_percentage=0.15)
+            return None
 
         count_of_buys = sum(order.ft_order_side == 'buy' and order.status == 'closed' for order in trade.orders)
         if count_of_buys <= self.max_safety_orders:
