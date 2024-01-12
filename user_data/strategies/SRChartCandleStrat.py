@@ -770,6 +770,7 @@ class SRChartCandleStrat(IStrategy):
         pass
 
     def detect_trend(self, dataframe):
+        dataframe['trend'] = 'downtrend'
         try:
             x = self.downtrend_max_candles.value
             aggregated_candle = {
@@ -786,8 +787,9 @@ class SRChartCandleStrat(IStrategy):
             logging.error(str(ex))
 
     def get_max_drawdown(self, dataframe):
+        t = self.downtrend_pct_treshold.value
+        dataframe['max_drawdown'] = self.timeframed_drops[self.timeframe] * t
         try:
-            t = self.downtrend_pct_treshold.value
             df = dataframe[-200:]
             cumulative_max = df['close'].cummax()
             if cumulative_max:
