@@ -1,0 +1,35 @@
+{
+  "strategy_name": "STPyramideStrategy",
+  "params": {
+    "roi": {
+      "0": 0.1
+    },
+    "stoploss": {
+      "stoploss": -0.05
+    },
+    "max_open_trades": {
+      "max_open_trades": 15
+    },
+    "buy": {
+      "decrease_percentage": 0.087,
+      "increase_percentage": 0.091,
+      "rsi": 37,
+      "stoploss1": 0.41,
+      "stoploss2": 1.592,
+      "takeprofit1": 0.971,
+      "takeprofit2": 1.593
+    },
+    "sell": {
+      "profit_treshold": 0.006
+    },
+    "protection": {},
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.346,
+      "trailing_stop_positive_offset": 0.367,
+      "trailing_only_offset_is_reached": true
+    }
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2024-01-13 18:41:25.535939+00:00"
+}
