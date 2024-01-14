@@ -24,7 +24,6 @@ def logwarning(param):
     logwarning(param)
     pass
 
-
 class STPyramideStrategy(IStrategy):
     INTERFACE_VERSION = 3
     position_adjustment_enable = True
@@ -154,6 +153,31 @@ class STPyramideStrategy(IStrategy):
         dataframe['is_hammer'] = (hammer > 0)
         dataframe['is_doji'] = (doji > 0)
         return dataframe
+
+    def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
+                            proposed_stake: float, min_stake: Optional[float], max_stake: float,
+                            leverage: float, entry_tag: Optional[str], side: str,
+                            **kwargs) -> float:
+        """
+        Calculate the custom stake amount for a given pair.
+
+        Args:
+            pair (str): The trading pair for which to calculate the stake amount.
+            current_time (datetime): The current datetime.
+            current_rate (float): The current rate for the trading pair.
+            proposed_stake (float): The proposed stake amount.
+            min_stake (Optional[float]): The minimum stake amount allowed (optional).
+            max_stake (float): The maximum stake amount allowed.
+            leverage (float): The leverage for the trading pair.
+            entry_tag (Optional[str]): An optional entry tag.
+            side (str): The side of the trade (buy or sell).
+            **kwargs: Additional keyword arguments.
+
+        Returns:
+            float: The calculated custom stake amount.
+        """
+        return proposed_stake * 0.25
+        pass
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
@@ -361,6 +385,3 @@ class STPyramideStrategy(IStrategy):
             logwarning("Sloupec 'stop_loss' neexistuje v DataFrame.")
 
         return dataframe
-
-
-
