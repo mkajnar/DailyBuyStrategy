@@ -18,11 +18,12 @@ class STPyramideStrategy(IStrategy):
     INTERFACE_VERSION = 3
     position_adjustment_enable = True
     trailing_stop = True
+    out_open_trades_limit = 10
     trailing_stop_positive = 0.005
     trailing_stop_positive_offset = 0.01
     trailing_only_offset_is_reached = True
     ignore_roi_if_entry_signal = True
-    exit_profit_only = True
+    exit_profit_only = False
     last_adjustment_time = {}
     order_openrates = {}
     minimal_roi = {
@@ -134,10 +135,10 @@ class STPyramideStrategy(IStrategy):
         open_rate = self.order_openrates.get(pair, None)
         if open_rate is not None:
             confirm = open_rate < rate
-        if confirm:
-            logging.info(
-                f"Confirmed trade for {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
-        return confirm
+        if confirm and (Trade.get_open_trade_count() <= self.out_open_trades_limit):
+            logging.info(f"Confirmed trade for {pair}, {order_type}, {amount}, {rate}, {time_in_force}, {current_time}, {entry_tag}, {side}, {kwargs}")
+            return confirm
+        return False
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
