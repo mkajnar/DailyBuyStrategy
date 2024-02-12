@@ -1,12 +1,15 @@
+---
 version: '3'
 services:
-  freqtrade:
+  freqtrade_hps:
     image: freqtradeorg/freqtrade:develop
     restart: unless-stopped
-    container_name: freqtrade
+    container_name: freqtrade_hps
     volumes:
-      - "./user_data:/freqtrade/user_data"
+      - "./user_data:/freqtrade/user_data:rw"
       - "/etc/localtime:/etc/localtime:ro"
+      - "./user_data/config.json:/freqtrade/user_data/config.json"
+      - "./user_data/exchange.json:/freqtrade/user_data/exchange.json"
     ports:
       - "8080:8080"
     command: >
@@ -14,28 +17,29 @@ services:
       --logfile /freqtrade/user_data/logs/freqtrade.log
       --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
       --config /freqtrade/user_data/config.json
-      --strategy HPStrategyTFJPAConfirmV3
+      --strategy HPStrategyV6
 
-  freqtrade_bt:
+  freqtrade_hps_backtest:
     image: freqtradeorg/freqtrade:develop
     restart: unless-stopped
-    container_name: freqtrade_bt
+    container_name: freqtrade_hps_backtest
     volumes:
-      - "./user_data:/freqtrade/user_data"
+      - "./user_data:/freqtrade/user_data:rw"
       - "/etc/localtime:/etc/localtime:ro"
     ports:
-      - "8081:8080"
+      - "8888:8080"
     command: >
       webserver
       --logfile /freqtrade/user_data/logs/freqtrade_bt.log
-      --config /freqtrade/user_data/config.json
+      --config /freqtrade/user_data/config_bt.json
 
-  proxy:
-    image: mikekonan/exchange-proxy:latest-amd64
-    deploy:
-      replicas: 1
+  jupyter_notebook:
+    image: jupyter/base-notebook
     restart: unless-stopped
+    container_name: jupyter_notebook
+    environment:
+      - JUPYTER_TOKEN=PASSWORD
+    volumes:
+      - "./user_data:/home/jovyan/user_data:rw"
     ports:
-      - "8888:8080"
-    container_name: proxy
-    command: -verbose 1
+      - "8889:8888"
