@@ -9,6 +9,7 @@ New version for using with Leveraged tokens on Bybit.
 
 ![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/75fbe155-05b1-458d-abc0-bad3083db83a)
 
+![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/a944d533-e380-4ed1-8944-005876ef9bca)
 
 
 
