@@ -9,7 +9,6 @@ services:
       - "./user_data:/freqtrade/user_data:rw"
       - "/etc/localtime:/etc/localtime:ro"
       - "./user_data/config.json:/freqtrade/user_data/config.json"
-      - "./user_data/exchange.json:/freqtrade/user_data/exchange.json"
     ports:
       - "8080:8080"
     command: >
@@ -31,7 +30,7 @@ services:
     command: >
       webserver
       --logfile /freqtrade/user_data/logs/freqtrade_bt.log
-      --config /freqtrade/user_data/config_bt.json
+      --config /freqtrade/user_data/config.json
 
   jupyter_notebook:
     image: jupyter/base-notebook
