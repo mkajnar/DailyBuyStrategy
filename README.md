@@ -1,4 +1,4 @@
-# HPStrategyV6 - DCA strategy
+# HPStrategyV7 - DCA strategy
 
 New version for using with Leveraged tokens on Bybit.
 
