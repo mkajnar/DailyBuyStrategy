@@ -212,7 +212,11 @@ class HPStrategyV7(IStrategy):
                 (current_profit > -self.dca_threshold_pct.value)):
             return None
 
-        averaged_stake = filled_entries[0].stake_amount
+        try:
+            averaged_stake = filled_entries[0].stake_amount
+        except Exception as exception:
+            averaged_stake = 5
+            pass
 
         try:
             if (count_of_entries > 0):
