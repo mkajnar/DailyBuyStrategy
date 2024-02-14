@@ -12,6 +12,7 @@ import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
 
+
 class HPStrategyV7(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
@@ -24,9 +25,9 @@ class HPStrategyV7(IStrategy):
     last_dca_timeframe = {}
     max_entry_position_adjustment = 5
     max_dca_multiplier = 5.5
-    open_trade_limit = 6
-    position_adjustment_enable = False
-    dca_threshold_pct = DecimalParameter(0.01, 0.50, default=0.20, decimals=2, space='buy',
+    open_trade_limit = 10
+    position_adjustment_enable = True
+    dca_threshold_pct = DecimalParameter(0.01, 0.50, default=0.07, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
 
@@ -37,7 +38,7 @@ class HPStrategyV7(IStrategy):
     trailing_stop_positive_offset = 0.01
     stoploss = -0.05 * leverage_value
     use_exit_signal = True
-    ignore_roi_if_entry_signal = False
+    ignore_roi_if_entry_signal = True
     # exit_profit_offset = 0.001 * leverage_value
     order_types = {
         'entry': 'market',
@@ -120,6 +121,8 @@ class HPStrategyV7(IStrategy):
         dataframe['cci'] = ta.CCI(dataframe, timeperiod=6)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
+        dataframe['cci_buy_signal'] = (
+                (dataframe['cci'] < -120) & (dataframe['rsi'] < 40) & (dataframe['volume'] > 0)).astype(int)
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
@@ -151,7 +154,7 @@ class HPStrategyV7(IStrategy):
         last_candle = dataframe.iloc[-1].squeeze()
         previous_candle = dataframe.iloc[-2].squeeze()
 
-        if (current_profit > self.dca_threshold_pct.value and trade.nr_of_successful_exits == 0):
+        if ((current_profit > (self.dca_threshold_pct.value * 3)) and (trade.nr_of_successful_exits == 0)):
             return -(trade.stake_amount / 2)
 
         if trade.id in self.last_dca_timeframe.keys():
@@ -161,24 +164,25 @@ class HPStrategyV7(IStrategy):
                 return None
 
         filled_entries = trade.select_filled_orders(trade.entry_side)
-        count_of_entries = trade.nr_of_successful_entries
+        count_of_entries = trade.nr_of_successful_entries - trade.nr_of_successful_exits
         if ((count_of_entries >= self.max_entry_position_adjustment) or
                 (last_candle['close'] < previous_candle['close']) or
                 (current_profit > -self.dca_threshold_pct.value)):
             return None
 
-        try:
-            averaged_stake = filled_entries[0].stake_amount
-        except Exception as exception:
-            averaged_stake = 5
-            pass
-
-        if (count_of_entries > 0):
-            averaged_stake = (sum([entry.stake_amount for entry in filled_entries
-                                   if entry.stake_amount > 0]) / count_of_entries)
-        stake_amount = averaged_stake * (1 + (count_of_entries * 0.25))
-        self.last_dca_timeframe[trade.id] = current_time
-        return stake_amount
+        if ((current_profit < -self.dca_threshold_pct.value * count_of_entries) and (
+                (last_candle['cci_buy_signal'] == 1) or (previous_candle['cci_buy_signal'] == 1))):
+            try:
+                averaged_stake = filled_entries[0].stake_amount
+            except Exception as exception:
+                averaged_stake = 5
+                pass
+            if (count_of_entries > 0):
+                averaged_stake = (sum([entry.stake_amount
+                                       for entry in filled_entries if entry.stake_amount > 0]) / count_of_entries)
+            stake_amount = averaged_stake * (1 + (count_of_entries * 0.25))
+            self.last_dca_timeframe[trade.id] = current_time
+            return stake_amount
 
     def timeframe_to_minutes(self, timeframe: str) -> int:
         """Convert a timeframe string to minutes."""
