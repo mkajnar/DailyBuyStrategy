@@ -15,3 +15,15 @@ New version for using with Leveraged tokens on Bybit.
 ![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/e602758c-06f1-4b3a-9963-a702c399dd30)
 
 ![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/00c284e9-5fd1-4f86-8a7f-89b46817080c)
+
+How DCA working?
+
+![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/7d7438d4-d752-4c50-abc8-011d71cb38f9)
+
+![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/653ffee2-2ae9-4fb9-8446-3b6dcc76a266)
+
+![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/5c448832-07c5-4f0c-ad07-2dea96ac7b9b)
+
+![image](https://github.com/mkajnar/HighProfitStrategy/assets/5566514/77ab5862-cd79-4bdd-9c1b-c15ec79cd093)
+
+
