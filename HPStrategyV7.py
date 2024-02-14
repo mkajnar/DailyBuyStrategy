@@ -27,7 +27,7 @@ class HPStrategyV7(IStrategy):
     last_dca_timeframe = {}
     max_entry_position_adjustment = 5
     max_dca_multiplier = 5.5
-    open_trade_limit = 6
+    open_trade_limit = 10
     position_adjustment_enable = True
     dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.03 * leverage_value, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
@@ -115,14 +115,14 @@ class HPStrategyV7(IStrategy):
         return max(stop_loss_percentage, self.stoploss)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
+        dataframe['cci'] = ta.CCI(dataframe, timeperiod=6)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[(dataframe['cci'] < -100) &
-                      (dataframe['rsi'] < 30) &
+        dataframe.loc[(dataframe['cci'] < -120) &
+                      # (dataframe['rsi'] < 40) &
                       (dataframe['volume'] > 0), ['enter_long', 'enter_tag']] = (1, 'cci_buy')
         return dataframe
 
