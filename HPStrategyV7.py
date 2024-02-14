@@ -29,7 +29,7 @@ class HPStrategyV7(IStrategy):
     max_dca_multiplier = 5.5
     open_trade_limit = 10
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.03 * leverage_value, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.03, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
 
@@ -195,6 +195,7 @@ class HPStrategyV7(IStrategy):
 
         if (current_profit > self.dca_threshold_pct.value and
                 trade.nr_of_successful_exits == 0):
+            logging.info(f"Taking half of the profit at +5% for {trade.pair}")
             return -(trade.stake_amount / 2)
 
         if trade.id in self.last_dca_timeframe.keys():
@@ -211,10 +212,19 @@ class HPStrategyV7(IStrategy):
                 (current_profit > -self.dca_threshold_pct.value)):
             return None
 
-        averaged_stake = (sum([entry.stake_amount for entry in filled_entries
-                               if entry.stake_amount > 0]) / count_of_entries)
+        averaged_stake = filled_entries[0].stake_amount
+
+        try:
+            if (count_of_entries > 0):
+                averaged_stake = (sum([entry.stake_amount for entry in filled_entries
+                                       if entry.stake_amount > 0]) / count_of_entries)
+        except Exception as exception:
+            logging.error(f"Error calculating average stake amount: {exception}")
+            pass
+
         stake_amount = averaged_stake * (1 + (count_of_entries * 0.25))
         self.last_dca_timeframe[trade.id] = current_time
+        logging.info(f"Adjusted stake amount for trade {trade.id}: {stake_amount}")
         return stake_amount
 
     def timeframe_to_minutes(self, timeframe: str) -> int:
