@@ -43,7 +43,7 @@ class HPStrategyV7(IStrategy):
         'entry': 'market',
         'exit': 'market',
         'stoploss': 'market',
-        'stoploss_on_exchange': True
+        'stoploss_on_exchange': False
     }
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
