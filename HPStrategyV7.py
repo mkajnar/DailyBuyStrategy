@@ -25,20 +25,21 @@ class HPStrategyV7(IStrategy):
     last_dca_timeframe = {}
     max_entry_position_adjustment = 5
     max_dca_multiplier = 5.5
-    open_trade_limit = 10
+    open_trade_limit = 15
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.50, default=0.07, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.03, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
 
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
     trailing_stop = True
     trailing_only_offset_is_reached = True
-    trailing_stop_positive = 0.003
-    trailing_stop_positive_offset = 0.01
+    trailing_stop_positive = 0.003 * leverage_value
+    trailing_stop_positive_offset = 0.01 * leverage_value
     stoploss = -0.05 * leverage_value
-    use_exit_signal = True
-    ignore_roi_if_entry_signal = True
+    use_exit_signal = False
+    ignore_roi_if_entry_signal = False
+    use_custom_stoploss = True
     # exit_profit_offset = 0.001 * leverage_value
     order_types = {
         'entry': 'market',
@@ -53,30 +54,29 @@ class HPStrategyV7(IStrategy):
         return self.leverage_value
 
     def calculate_heiken_ashi(self, dataframe):
+        if dataframe.empty:
+            raise ValueError("DataFrame je prázdný")
         heiken_ashi = pd.DataFrame(index=dataframe.index)
-        heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe[
-            'close']) / 4
+        heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
         heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
         heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
-        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(
-            axis=1)
+        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
         heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
         # Aplikace klouzavého průměru
         heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
         heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
         heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
         heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
+
         return heiken_ashi
 
     def should_already_sell(self, dataframe):
         heiken_ashi = self.calculate_heiken_ashi(dataframe)
-        if heiken_ashi is not None:
-            last_candle = heiken_ashi.iloc[-1]
-            if last_candle['HA_Close'] > last_candle['HA_Open']:
-                return False
-            else:
-                return True
-        return True
+        last_candle = heiken_ashi.iloc[-1]
+        if last_candle['HA_Close'] > last_candle['HA_Open']:
+            return False
+        else:
+            return True
 
     def adjust_entry_price(self, trade: Trade, order: Optional[Order], pair: str,
                            current_time: datetime, proposed_rate: float, current_order_rate: float,
@@ -98,44 +98,42 @@ class HPStrategyV7(IStrategy):
             return rate > trade.open_rate + self.trailing_stop_positive_offset * self.leverage_value
         if exit_reason in force_reasons:
             return True
-        return self.should_already_sell(dataframe)
+        # should_already_sell = self.should_already_sell(dataframe)
+        # if should_already_sell:
+        #     return True
+        return True
 
-    # def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
-    #                     current_profit: float, **kwargs) -> float:
-    #     try:
-    #         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-    #         if 'atr' in dataframe.columns:
-    #             atr = dataframe.iloc[-1]['atr']
-    #             atr_multiplier = 3
-    #             stop_loss_atr = atr * atr_multiplier
-    #             stop_loss_percentage = -stop_loss_atr / current_rate
-    #             return max(stop_loss_percentage, self.stoploss)
-    #     except Exception as exception:
-    #         exc_type, exc_obj, exc_tb = sys.exc_info()
-    #         fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-    #         logging.error('{} - {} - {}'.format(exc_type, fname, exc_tb.tb_lineno))
-    #         pass
-    #     return self.stoploss
+    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+                        current_profit: float, **kwargs) -> float:
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        atr = dataframe.iloc[-1]['atr']
+        atr_multiplier = 3
+        stop_loss_atr = atr * atr_multiplier
+        stop_loss_percentage = -stop_loss_atr / current_rate
+        return max(stop_loss_percentage, self.stoploss)
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe['cci'] = ta.CCI(dataframe, timeperiod=6)
+        dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
         dataframe['cci_buy_signal'] = (
-                (dataframe['cci'] < -120) & (dataframe['rsi'] < 40) & (dataframe['volume'] > 0)).astype(int)
+                (dataframe['cci'] < -100) & (dataframe['rsi'] < 50) & (dataframe['volume'] > 0)).astype(int)
+
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[(dataframe['cci'] < -120) &
-                      (dataframe['rsi'] < 40) &
+        dataframe.loc[(dataframe['cci'] < -100) &
+                      (dataframe['rsi'] < 50) &
                       (dataframe['volume'] > 0), ['enter_long', 'enter_tag']] = (1, 'cci_buy')
         return dataframe
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[(dataframe['cci'] > 100) &
-                      (dataframe['rsi'] > 70) &
+                      (dataframe['rsi'] > 80) &
                       (dataframe['volume'] > 0), ['exit_long', 'exit_tag']] = (1, 'cci_sell')
         return dataframe
+
+        # This is called when placing the initial order (opening trade)
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
