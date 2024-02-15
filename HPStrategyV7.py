@@ -5,7 +5,9 @@ import sys
 import numpy as np  # noqa
 import pandas as pd  # noqa
 from pandas import DataFrame
-from typing import Optional, Union
+from typing import Optional, Union, List
+
+from freqtrade.enums import ExitCheckTuple
 from freqtrade.persistence import Trade, Order
 from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, IStrategy, IntParameter)
 import datetime
@@ -33,10 +35,9 @@ class HPStrategyV7(IStrategy):
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
 
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
-    trailing_stop = True
-    trailing_only_offset_is_reached = True
     trailing_stop_positive = 0.003 * leverage_value
     trailing_stop_positive_offset = 0.01 * leverage_value
+
     stoploss = -0.10 * leverage_value
     use_exit_signal = False
     ignore_roi_if_entry_signal = False
@@ -105,12 +106,14 @@ class HPStrategyV7(IStrategy):
 
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                         current_profit: float, **kwargs) -> float:
-        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        atr = dataframe.iloc[-1]['atr']
-        atr_multiplier = 3
-        stop_loss_atr = atr * atr_multiplier
-        stop_loss_percentage = -stop_loss_atr / current_rate
-        return max(stop_loss_percentage, self.stoploss)
+        if current_profit > self.trailing_stop_positive_offset:
+            logging.info(f"Checking CSL - {current_profit} for pair {pair} at rate {current_rate} - S1")
+            new_stop_loss = current_profit - self.trailing_stop_positive
+            logging.info(f"Checking CSL - {new_stop_loss} for pair {pair} at rate {current_rate} - S2")
+            r = max(new_stop_loss, self.stoploss)
+            logging.info(f"Checking CSL - {r} for pair {pair} at rate {current_rate} - S3")
+            return r
+        return -1
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
