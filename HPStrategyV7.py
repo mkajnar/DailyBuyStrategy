@@ -7,6 +7,8 @@ import pandas as pd  # noqa
 from pandas import DataFrame
 from typing import Optional, Union, List
 
+from pandas_ta import stdev
+
 from freqtrade.enums import ExitCheckTuple
 from freqtrade.persistence import Trade, Order
 from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, IStrategy, IntParameter)
@@ -30,7 +32,7 @@ class HPStrategyV7(IStrategy):
     max_dca_multiplier = 5.5
     open_trade_limit = 15
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.07, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.15, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
 
@@ -56,30 +58,30 @@ class HPStrategyV7(IStrategy):
                  **kwargs) -> float:
         return self.leverage_value
 
-    def calculate_heiken_ashi(self, dataframe):
-        if dataframe.empty:
-            raise ValueError("DataFrame je prázdný")
-        heiken_ashi = pd.DataFrame(index=dataframe.index)
-        heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
-        heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
-        heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
-        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
-        heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
-        # Aplikace klouzavého průměru
-        heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
-
-        return heiken_ashi
-
-    def should_already_sell(self, dataframe):
-        heiken_ashi = self.calculate_heiken_ashi(dataframe)
-        last_candle = heiken_ashi.iloc[-1]
-        if last_candle['HA_Close'] > last_candle['HA_Open']:
-            return False
-        else:
-            return True
+    # def calculate_heiken_ashi(self, dataframe):
+    #     if dataframe.empty:
+    #         raise ValueError("DataFrame je prázdný")
+    #     heiken_ashi = pd.DataFrame(index=dataframe.index)
+    #     heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
+    #     heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
+    #     heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
+    #     heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
+    #     heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
+    #     # Aplikace klouzavého průměru
+    #     heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
+    #     heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
+    #     heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
+    #     heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
+    #
+    #     return heiken_ashi
+    #
+    # def should_already_sell(self, dataframe):
+    #     heiken_ashi = self.calculate_heiken_ashi(dataframe)
+    #     last_candle = heiken_ashi.iloc[-1]
+    #     if last_candle['HA_Close'] > last_candle['HA_Open']:
+    #         return False
+    #     else:
+    #         return True
 
     def adjust_entry_price(self, trade: Trade, order: Optional[Order], pair: str,
                            current_time: datetime, proposed_rate: float, current_order_rate: float,
@@ -121,6 +123,25 @@ class HPStrategyV7(IStrategy):
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
         dataframe['cci_buy_signal'] = (
                 (dataframe['cci'] < -100) & (dataframe['rsi'] < 50) & (dataframe['volume'] > 0)).astype(int)
+        dataframe['smi'] = pta.smi(dataframe, length=20, scalar=2)
+        dataframe = self.prepare_rti(dataframe)
+        return dataframe
+
+    def prepare_rti(self, dataframe):
+        try:
+            trend_data_count = 100
+            trend_sensitivity_percentage = 95
+            signal_length = 20
+            dataframe['upper_trend'] = dataframe['close'] + stdev(dataframe['close'], 2)
+            dataframe['lower_trend'] = dataframe['close'] - stdev(dataframe['close'], 2)
+            upper_array = dataframe['upper_trend'].rolling(window=trend_data_count).apply(
+                lambda x: np.sort(x)[-int(trend_sensitivity_percentage / 100 * len(x))])
+            lower_array = dataframe['lower_trend'].rolling(window=trend_data_count).apply(
+                lambda x: np.sort(x)[int((100 - trend_sensitivity_percentage) / 100 * len(x)) - 1])
+            dataframe['RTI'] = (dataframe['close'] - lower_array) / (upper_array - lower_array) * 100
+            dataframe['MA_RTI'] = ta.ema(dataframe['RTI'], length=signal_length)
+        except:
+            pass
 
         return dataframe
 
