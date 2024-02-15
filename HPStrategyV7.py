@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 
@@ -34,8 +35,8 @@ class HPStrategyV7(IStrategy):
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
     trailing_stop = True
     trailing_only_offset_is_reached = True
-    trailing_stop_positive = 0.003
-    trailing_stop_positive_offset = 0.01
+    trailing_stop_positive = 0.003 * leverage_value
+    trailing_stop_positive_offset = 0.01 * leverage_value
     stoploss = -0.10 * leverage_value
     use_exit_signal = False
     ignore_roi_if_entry_signal = False
@@ -93,16 +94,14 @@ class HPStrategyV7(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        force_reasons = ['force_sell', 'force_exit', 'roi']
-        dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-        if 'trailing' in exit_reason:
-            return rate > trade.open_rate + self.trailing_stop_positive_offset * self.leverage_value
-        if exit_reason in force_reasons:
-            return True
-        # should_already_sell = self.should_already_sell(dataframe)
-        # if should_already_sell:
-        #     return True
-        return False
+        logging.info(f"Checking CTE - {exit_reason} for pair {pair} at rate {rate} - S1")
+        # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
+        #     return False
+        if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
+            return False
+        if 'roi' in exit_reason and trade.calc_profit_ratio(rate) < 0:
+            return False
+        return True
 
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
                         current_profit: float, **kwargs) -> float:
