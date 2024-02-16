@@ -58,30 +58,30 @@ class HPStrategyV7(IStrategy):
                  **kwargs) -> float:
         return self.leverage_value
 
-    # def calculate_heiken_ashi(self, dataframe):
-    #     if dataframe.empty:
-    #         raise ValueError("DataFrame je prázdný")
-    #     heiken_ashi = pd.DataFrame(index=dataframe.index)
-    #     heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
-    #     heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
-    #     heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
-    #     heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
-    #     heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
-    #     # Aplikace klouzavého průměru
-    #     heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
-    #     heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
-    #     heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
-    #     heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
-    #
-    #     return heiken_ashi
-    #
-    # def should_already_sell(self, dataframe):
-    #     heiken_ashi = self.calculate_heiken_ashi(dataframe)
-    #     last_candle = heiken_ashi.iloc[-1]
-    #     if last_candle['HA_Close'] > last_candle['HA_Open']:
-    #         return False
-    #     else:
-    #         return True
+    def calculate_heiken_ashi(self, dataframe):
+        if dataframe.empty:
+            raise ValueError("DataFrame je prázdný")
+        heiken_ashi = pd.DataFrame(index=dataframe.index)
+        heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
+        heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
+        heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
+        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
+        heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
+        # Aplikace klouzavého průměru
+        heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
+        heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
+        heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
+        heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
+
+        return heiken_ashi
+
+    def should_already_sell(self, dataframe):
+        heiken_ashi = self.calculate_heiken_ashi(dataframe)
+        last_candle = heiken_ashi.iloc[-1].squeeze()
+        if last_candle['HA_Close'] > last_candle['HA_Open']:
+            return False
+        else:
+            return True
 
     def adjust_entry_price(self, trade: Trade, order: Optional[Order], pair: str,
                            current_time: datetime, proposed_rate: float, current_order_rate: float,
@@ -98,12 +98,15 @@ class HPStrategyV7(IStrategy):
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
         logging.info(f"Checking CTE - {exit_reason} for pair {pair} at rate {rate} - S1")
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
         #     return False
         if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
             return False
         if 'roi' in exit_reason and trade.calc_profit_ratio(rate) < 0:
             return False
+        if 'roi' in exit_reason and trade.calc_profit_ratio(rate) > 0:
+            return self.should_already_sell(dataframe=dataframe)
         return True
 
     def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
@@ -148,6 +151,7 @@ class HPStrategyV7(IStrategy):
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[(dataframe['cci'] < -100) &
                       (dataframe['rsi'] < 50) &
+                      (dataframe['rti_buy_signal'] == 1) &
                       (dataframe['volume'] > 0), ['enter_long', 'enter_tag']] = (1, 'cci_buy')
         return dataframe
 
