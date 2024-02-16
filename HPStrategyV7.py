@@ -128,7 +128,7 @@ class HPStrategyV7(IStrategy):
                 (dataframe['cci'] < -100) & (dataframe['rsi'] < 50) & (dataframe['volume'] > 0)).astype(int)
         dataframe['smi'] = pta.smi(dataframe, length=20, scalar=2)
         dataframe = self.prepare_rti(dataframe)
-        dataframe['rti_buy_signal'] = (dataframe['RTI'] < -70).astype(int)
+        dataframe['rti_buy_signal'] = (dataframe['rti'] < -50).astype(int)
         return dataframe
 
     def prepare_rti(self, dataframe):
@@ -142,8 +142,8 @@ class HPStrategyV7(IStrategy):
                 lambda x: np.sort(x)[-int(trend_sensitivity_percentage / 100 * len(x))])
             lower_array = dataframe['lower_trend'].rolling(window=trend_data_count).apply(
                 lambda x: np.sort(x)[int((100 - trend_sensitivity_percentage) / 100 * len(x)) - 1])
-            dataframe['RTI'] = (dataframe['close'] - lower_array) / (upper_array - lower_array) * 100
-            dataframe['MA_RTI'] = ta.ema(dataframe['RTI'], length=signal_length)
+            dataframe['rti'] = (dataframe['close'] - lower_array) / (upper_array - lower_array) * 100
+            dataframe['MA_RTI'] = ta.ema(dataframe['rti'], length=signal_length)
         except:
             pass
 
@@ -153,6 +153,8 @@ class HPStrategyV7(IStrategy):
         dataframe.loc[(dataframe['cci'] < -100) &
                       (dataframe['rsi'] < 50) &
                       (dataframe['rti_buy_signal'] == 1) &
+                      (dataframe['cci'].shift(1) < dataframe['cci']) &
+                      (dataframe['rti'].shift(1) < dataframe['rti']) &
                       (dataframe['volume'] > 0), ['enter_long', 'enter_tag']] = (1, 'cci_buy')
         return dataframe
 
