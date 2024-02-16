@@ -128,6 +128,7 @@ class HPStrategyV7(IStrategy):
                 (dataframe['cci'] < -100) & (dataframe['rsi'] < 50) & (dataframe['volume'] > 0)).astype(int)
         dataframe['smi'] = pta.smi(dataframe, length=20, scalar=2)
         dataframe = self.prepare_rti(dataframe)
+        dataframe['rti_buy_signal'] = (dataframe['RTI'] < -70).astype(int)
         return dataframe
 
     def prepare_rti(self, dataframe):
