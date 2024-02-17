@@ -92,11 +92,11 @@ class HPStrategyV7(IStrategy):
 
         dca_count = trade.nr_of_successful_entries - trade.nr_of_successful_exits + 1
         if current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value):
-            logging.info(f"Position over time {self.max_hold_time.value} hours, close position.")
+            logging.info(f"Position for {pair} over time {self.max_hold_time.value} hours, close position.")
             return 1
-        if dca_count >= 3:
+        if dca_count >= self.max_entry_position_adjustment.value:
             if current_profit < 0:
-                logging.info(f"Position after {dca_count} DCA is not profitable, close position.")
+                logging.info(f"Position for {pair} after {dca_count} DCA is not profitable, close position.")
             return 1
 
     def calculate_heiken_ashi(self, dataframe):
