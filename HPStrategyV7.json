@@ -1,0 +1,54 @@
+{
+  "strategy_name": "HPStrategyV7",
+  "params": {
+    "roi": {
+      "0": 0.03
+    },
+    "stoploss": {
+      "stoploss": -0.25
+    },
+    "trailing": {
+      "trailing_stop": false,
+      "trailing_stop_positive": 0.003,
+      "trailing_stop_positive_offset": 0.008,
+      "trailing_only_offset_is_reached": false
+    },
+    "max_open_trades": {
+      "max_open_trades": 5
+    },
+    "buy": {
+      "buy_cti_32": -0.58,
+      "buy_rsi_32": 35,
+      "buy_rsi_fast_32": 45,
+      "buy_sma15_32": 0.961,
+      "candles_before_dca": 2,
+      "close_perc_threshold_buy": 0.81,
+      "dca_threshold_pct": 0.031,
+      "open_trade_limit": 20,
+      "rolling_ha_treshold": 10
+    },
+    "sell": {
+      "sell_deadfish_bb_factor": 1.0,
+      "sell_deadfish_bb_width": 0.05,
+      "sell_deadfish_profit": -0.05,
+      "sell_deadfish_volume_factor": 1.0,
+      "adj1": 3,
+      "adj10": 2,
+      "adj3": 3,
+      "adj5": 3,
+      "m1": 1.5,
+      "m10": 7.0,
+      "m3": 9.9,
+      "m5": 7.3,
+      "max_hold_time": 10.9,
+      "sell_fastx": 90,
+      "sl1": 0.27,
+      "sl10": 0.15,
+      "sl3": 0.05,
+      "sl5": 0.02
+    },
+    "protection": {}
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2024-02-17 15:24:24.727303+00:00"
+}
