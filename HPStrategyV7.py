@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from functools import reduce
 
 import numpy as np  # noqa
 import pandas as pd  # noqa
@@ -28,24 +29,42 @@ class HPStrategyV7(IStrategy):
     }
 
     last_dca_timeframe = {}
-    max_entry_position_adjustment = 5
+    max_entry_position_adjustment = 3
     max_dca_multiplier = 5.5
-    open_trade_limit = 15
+    open_trade_limit = 5
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.20, default=0.15, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.01, 0.15, default=0.033, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
-    candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
+    max_hold_time = IntParameter(1, 24, default=8, space='buy', optimize=True)
 
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
-    trailing_stop_positive = 0.003 * leverage_value
-    trailing_stop_positive_offset = 0.01 * leverage_value
 
-    stoploss = -0.10 * leverage_value
+    is_optimize_32 = True
+    buy_rsi_fast_32 = IntParameter(20, 70, default=45, space='buy', optimize=is_optimize_32)
+    buy_rsi_32 = IntParameter(15, 50, default=35, space='buy', optimize=is_optimize_32)
+    buy_sma15_32 = DecimalParameter(0.900, 1, default=0.961, decimals=3, space='buy', optimize=is_optimize_32)
+    buy_cti_32 = DecimalParameter(-1, 0, default=-0.58, decimals=2, space='buy', optimize=is_optimize_32)
+    sell_fastx = IntParameter(50, 100, default=70, space='sell', optimize=True)
+    close_perc_threshold_buy = DecimalParameter(0.750, 1.000, default=0.999, decimals=3, space='buy', optimize=True)
+    is_optimize_deadfish = True
+    sell_deadfish_bb_width = DecimalParameter(0.03, 0.75, default=0.05, space='sell', optimize=is_optimize_deadfish)
+    sell_deadfish_profit = DecimalParameter(-0.15, -0.05, default=-0.05, space='sell', optimize=is_optimize_deadfish)
+    sell_deadfish_bb_factor = DecimalParameter(0.90, 1.20, default=1.0, space='sell', optimize=is_optimize_deadfish)
+    sell_deadfish_volume_factor = DecimalParameter(1, 2.5, default=1.0, space='sell', optimize=is_optimize_deadfish)
+
+
+    trailing_stop_positive = 0.003
+    trailing_stop_positive_offset = 0.008
+    stoploss = -0.037 * leverage_value
+
+    fast_ewo = 100
+    slow_ewo = 200
+
     use_exit_signal = False
     ignore_roi_if_entry_signal = False
     use_custom_stoploss = True
-    # exit_profit_offset = 0.001 * leverage_value
-    exit_profit_only = True
+    exit_profit_offset = 0.001 * leverage_value
+    exit_profit_only = False
     order_types = {
         'entry': 'market',
         'exit': 'market',
@@ -57,6 +76,26 @@ class HPStrategyV7(IStrategy):
                  proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str,
                  **kwargs) -> float:
         return self.leverage_value
+
+    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
+                        current_profit: float, **kwargs) -> float:
+
+        if current_profit > self.trailing_stop_positive_offset:
+            logging.info(f"Checking CSL - {current_profit} for pair {pair} at rate {current_rate} - S1")
+            new_stop_loss = current_profit - self.trailing_stop_positive
+            logging.info(f"Checking CSL - {new_stop_loss} for pair {pair} at rate {current_rate} - S2")
+            r = max(new_stop_loss, self.stoploss)
+            logging.info(f"Checking CSL - {r} for pair {pair} at rate {current_rate} - S3")
+            return r
+
+        dca_count = trade.nr_of_successful_entries - trade.nr_of_successful_exits + 1
+        if current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value):
+            logging.info(f"Position over time {self.max_hold_time.value} hours, close position.")
+            return 1
+        if dca_count >= 3:
+            if current_profit < 0:
+                logging.info(f"Position after {dca_count} DCA is not profitable, close position.")
+            return 1
 
     def calculate_heiken_ashi(self, dataframe):
         if dataframe.empty:
@@ -92,6 +131,9 @@ class HPStrategyV7(IStrategy):
     def confirm_trade_entry(self, pair: str, order_type: str, amount: float, rate: float,
                             time_in_force: str, current_time: datetime, entry_tag: Optional[str],
                             side: str, **kwargs) -> bool:
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        latest_candle = dataframe.iloc[-1].squeeze()
+        previous_candle = dataframe.iloc[-2].squeeze()
         return (Trade.get_open_trade_count() < self.open_trade_limit)
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -101,6 +143,8 @@ class HPStrategyV7(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
         #     return False
+        # if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) > 0:
+        #     return self.should_already_sell(dataframe=dataframe)
         if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
             return False
         if 'roi' in exit_reason and trade.calc_profit_ratio(rate) < 0:
@@ -109,26 +153,57 @@ class HPStrategyV7(IStrategy):
             return self.should_already_sell(dataframe=dataframe)
         return True
 
-    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: 'datetime', current_rate: float,
-                        current_profit: float, **kwargs) -> float:
-        if current_profit > self.trailing_stop_positive_offset:
-            logging.info(f"Checking CSL - {current_profit} for pair {pair} at rate {current_rate} - S1")
-            new_stop_loss = current_profit - self.trailing_stop_positive
-            logging.info(f"Checking CSL - {new_stop_loss} for pair {pair} at rate {current_rate} - S2")
-            r = max(new_stop_loss, self.stoploss)
-            logging.info(f"Checking CSL - {r} for pair {pair} at rate {current_rate} - S3")
-            return r
-        return -1
+    def ewo(self, dataframe, ema_length=5, ema2_length=35):
+        df = dataframe.copy()
+        ema1 = ta.EMA(df, timeperiod=ema_length)
+        ema2 = ta.EMA(df, timeperiod=ema2_length)
+        emadif = (ema1 - ema2) / df['close'] * 100
+        return emadif
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
-        dataframe['cci_buy_signal'] = (
-                (dataframe['cci'] < -100) & (dataframe['rsi'] < 50) & (dataframe['volume'] > 0)).astype(int)
-        dataframe['smi'] = pta.smi(dataframe, length=20, scalar=2)
-        dataframe = self.prepare_rti(dataframe)
-        dataframe['rti_buy_signal'] = (dataframe['rti'] < -50).astype(int)
+
+        dataframe['sma_15'] = ta.SMA(dataframe, timeperiod=15)
+        dataframe['cti'] = pta.cti(dataframe["close"], length=20)
+        dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+        dataframe['rsi_fast'] = ta.RSI(dataframe, timeperiod=4)
+        dataframe['rsi_slow'] = ta.RSI(dataframe, timeperiod=20)
+        # profit sell indicators
+        stoch_fast = ta.STOCHF(dataframe, 5, 3, 0, 3, 0)
+        dataframe['fastk'] = stoch_fast['fastk']
+        dataframe['cci'] = ta.CCI(dataframe, timeperiod=20)
+        dataframe['sma_15'] = ta.SMA(dataframe, timeperiod=15)
+        dataframe['cti'] = pta.cti(dataframe["close"], length=20)
+        dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+        dataframe['rsi_fast'] = ta.RSI(dataframe, timeperiod=4)
+        dataframe['rsi_slow'] = ta.RSI(dataframe, timeperiod=20)
+
+        # ewo indicators
+        dataframe['ema_8'] = ta.EMA(dataframe, timeperiod=8)
+        dataframe['ema_16'] = ta.EMA(dataframe, timeperiod=16)
+
+        # profit sell indicators
+        stoch_fast = ta.STOCHF(dataframe, 5, 5, 1, 5, 1)
+        dataframe['fastd'] = stoch_fast['fastd']
+        dataframe['fastk'] = stoch_fast['fastk']
+
+        # loss sell indicators
+        bollinger2 = qtpylib.bollinger_bands(qtpylib.typical_price(dataframe), window=20, stds=2)
+        dataframe['bb_lowerband2'] = bollinger2['lower']
+        dataframe['bb_middleband2'] = bollinger2['mid']
+        dataframe['bb_upperband2'] = bollinger2['upper']
+
+        dataframe['bb_width'] = (
+                (dataframe['bb_upperband2'] - dataframe['bb_lowerband2']) / dataframe['bb_middleband2'])
+
+        dataframe['volume_mean_12'] = dataframe['volume'].rolling(12).mean().shift(1)
+        dataframe['volume_mean_24'] = dataframe['volume'].rolling(24).mean().shift(1)
+
+        dataframe['mfi'] = ta.MFI(dataframe, timeperiod=14)
+        dataframe['cap'] = (dataframe['volume'].shift(0) * dataframe['close'].shift(0))
+
         return dataframe
 
     def prepare_rti(self, dataframe):
@@ -150,13 +225,38 @@ class HPStrategyV7(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[(dataframe['cci'] < -100) &
-                      (dataframe['rsi'] < 50) &
-                      (dataframe['rti_buy_signal'] == 1) &
-                      (dataframe['cci'].shift(1) < dataframe['cci']) &
-                      (dataframe['rti'].shift(1) < dataframe['rti']) &
-                      (dataframe['volume'] > 0), ['enter_long', 'enter_tag']] = (1, 'cci_buy')
+        conditions = []
+        dataframe.loc[:, 'enter_tag'] = ''
+        buy_1 = (
+                ((dataframe['rsi_slow'] < dataframe['rsi_slow'].shift(1)) &
+                 (dataframe['rsi_fast'] < self.buy_rsi_fast_32.value) &
+                 (dataframe['rsi'] > self.buy_rsi_32.value) &
+                 (dataframe['close'] < dataframe['sma_15'] * self.buy_sma15_32.value) &
+                 (dataframe['cti'] < self.buy_cti_32.value)) |
+                (qtpylib.crossed_above(dataframe['rsi_fast'], dataframe['rsi_slow']))
+        )
+        conditions.append(buy_1)
+        dataframe.loc[buy_1, 'enter_tag'] += 'buy_1'
+        if conditions:
+            dataframe.loc[
+                reduce(lambda x, y: x | y, conditions),
+                'enter_long'] = 1
+
         return dataframe
+
+    def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
+                    current_profit: float, **kwargs) -> Optional[Union[str, bool]]:
+
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        current_candle = dataframe.iloc[-1].squeeze()
+
+        # stoploss - deadfish
+        if ((current_profit < self.sell_deadfish_profit.value)
+                and (current_candle['bb_width'] < self.sell_deadfish_bb_width.value)
+                and (current_candle['close'] > current_candle['bb_middleband2'] * self.sell_deadfish_bb_factor.value)
+                and (current_candle['volume_mean_12'] < current_candle[
+                    'volume_mean_24'] * self.sell_deadfish_volume_factor.value)):
+            return "sell_stoploss_deadfish"
 
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[(dataframe['cci'] > 100) &
@@ -186,11 +286,11 @@ class HPStrategyV7(IStrategy):
         if ((current_profit > (self.dca_threshold_pct.value * 3)) and (trade.nr_of_successful_exits == 0)):
             return -(trade.stake_amount / 2)
 
-        if trade.id in self.last_dca_timeframe.keys():
-            td = current_time - self.last_dca_timeframe[trade.id]
-            if ((td.total_seconds() / 60)
-                    < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
-                return None
+        # if trade.id in self.last_dca_timeframe.keys():
+        #     td = current_time - self.last_dca_timeframe[trade.id]
+        #     if ((td.total_seconds() / 60)
+        #             < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
+        #         return None
 
         filled_entries = trade.select_filled_orders(trade.entry_side)
         count_of_entries = trade.nr_of_successful_entries - trade.nr_of_successful_exits
@@ -199,8 +299,7 @@ class HPStrategyV7(IStrategy):
                 (current_profit > -self.dca_threshold_pct.value)):
             return None
 
-        if ((current_profit < -self.dca_threshold_pct.value * count_of_entries) and (
-                (last_candle['cci_buy_signal'] == 1) or (previous_candle['cci_buy_signal'] == 1))):
+        if (current_profit < -self.dca_threshold_pct.value * count_of_entries):
             try:
                 averaged_stake = filled_entries[0].stake_amount
             except Exception as exception:
@@ -214,7 +313,6 @@ class HPStrategyV7(IStrategy):
             return stake_amount
 
     def timeframe_to_minutes(self, timeframe: str) -> int:
-        """Convert a timeframe string to minutes."""
         if 'm' in timeframe:
             return int(timeframe.replace('m', ''))
         elif 'h' in timeframe:
