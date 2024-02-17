@@ -3,6 +3,7 @@ import os
 import sys
 from functools import reduce
 
+import numpy
 import numpy as np  # noqa
 import pandas as pd  # noqa
 from pandas import DataFrame
@@ -22,42 +23,62 @@ import pandas_ta as pta
 class HPStrategyV7(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
-    leverage_value = 10
+    leverage_value = 3
 
     minimal_roi = {
         "0": 0.03
     }
 
+    is_opt_sl = True
+    sl1 = DecimalParameter(0.01, 0.50, default=0.35, space='sell', decimals=2, optimize=is_opt_sl)
+    sl3 = DecimalParameter(0.01, 0.35, default=0.25, space='sell', decimals=2, optimize=is_opt_sl)
+    sl5 = DecimalParameter(0.01, 0.25, default=0.2, space='sell', decimals=2, optimize=is_opt_sl)
+    sl10 = DecimalParameter(0.01, 0.20, default=0.15, space='sell', decimals=2, optimize=is_opt_sl)
+    stoplosses = {1: -sl1.value, 3: -sl3.value, 5: -sl5.value, 10: -sl10.value}
+
+    is_opt_adj = True
+    adj1 = IntParameter(1, 5, default=5, space='sell', optimize=is_opt_adj)
+    adj3 = IntParameter(1, 5, default=3, space='sell', optimize=is_opt_adj)
+    adj5 = IntParameter(1, 5, default=2, space='sell', optimize=is_opt_adj)
+    adj10 = IntParameter(1, 5, default=1, space='sell', optimize=is_opt_adj)
+    adjustments = {1: adj1.value, 3: adj3.value, 5: adj5.value, 10: adj10.value}
+
+    is_opt_m = True
+    m1 = DecimalParameter(0.1, 10, default=1.5, space='sell', decimals=1, optimize=is_opt_m)
+    m3 = DecimalParameter(0.1, 10, default=2.25, space='sell', decimals=1, optimize=is_opt_m)
+    m5 = DecimalParameter(0.1, 10, default=5.5, space='sell', decimals=1, optimize=is_opt_m)
+    m10 = DecimalParameter(0.1, 10, default=7.5, space='sell', decimals=1, optimize=is_opt_m)
+    multis = {1: m1.value, 3: m3.value, 5: m5.value, 10: m10.value}
+
     last_dca_timeframe = {}
-    max_entry_position_adjustment = 3
-    max_dca_multiplier = 5.5
-    open_trade_limit = 5
+    max_entry_position_adjustment = adjustments[leverage_value]
+    max_dca_multiplier = multis[max_entry_position_adjustment]
+    open_trade_limit = IntParameter(1, 20, default=5, space='buy', optimize=True)
+    is_opt_position_adjustment = True
+
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.15, default=0.033, decimals=2, space='buy',
-                                         optimize=position_adjustment_enable)
-    max_hold_time = IntParameter(1, 24, default=8, space='buy', optimize=True)
+    dca_threshold_pct = DecimalParameter(0.01, 0.15, default=0.125, decimals=3, space='buy', optimize=position_adjustment_enable)
 
+    max_hold_time = DecimalParameter(1, 24, default=8, space='sell', optimize=True, decimals=1)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
-
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
 
-    is_optimize_32 = True
+    is_optimize_32 = False
     buy_rsi_fast_32 = IntParameter(20, 70, default=45, space='buy', optimize=is_optimize_32)
     buy_rsi_32 = IntParameter(15, 50, default=35, space='buy', optimize=is_optimize_32)
     buy_sma15_32 = DecimalParameter(0.900, 1, default=0.961, decimals=3, space='buy', optimize=is_optimize_32)
     buy_cti_32 = DecimalParameter(-1, 0, default=-0.58, decimals=2, space='buy', optimize=is_optimize_32)
     sell_fastx = IntParameter(50, 100, default=70, space='sell', optimize=True)
     close_perc_threshold_buy = DecimalParameter(0.750, 1.000, default=0.999, decimals=3, space='buy', optimize=True)
-    is_optimize_deadfish = True
+    is_optimize_deadfish = False
     sell_deadfish_bb_width = DecimalParameter(0.03, 0.75, default=0.05, space='sell', optimize=is_optimize_deadfish)
     sell_deadfish_profit = DecimalParameter(-0.15, -0.05, default=-0.05, space='sell', optimize=is_optimize_deadfish)
     sell_deadfish_bb_factor = DecimalParameter(0.90, 1.20, default=1.0, space='sell', optimize=is_optimize_deadfish)
     sell_deadfish_volume_factor = DecimalParameter(1, 2.5, default=1.0, space='sell', optimize=is_optimize_deadfish)
 
-
     trailing_stop_positive = 0.003
     trailing_stop_positive_offset = 0.008
-    stoploss = -0.037 * leverage_value
+    stoploss = stoplosses[leverage_value]
 
     fast_ewo = 100
     slow_ewo = 200
@@ -71,7 +92,7 @@ class HPStrategyV7(IStrategy):
         'entry': 'market',
         'exit': 'market',
         'stoploss': 'market',
-        'stoploss_on_exchange': False
+        'stoploss_on_exchange': True
     }
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
@@ -94,7 +115,7 @@ class HPStrategyV7(IStrategy):
         if current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value):
             logging.info(f"Position for {pair} over time {self.max_hold_time.value} hours, close position.")
             return 1
-        if dca_count >= self.max_entry_position_adjustment.value:
+        if dca_count >= self.max_entry_position_adjustment:
             if current_profit < 0:
                 logging.info(f"Position for {pair} after {dca_count} DCA is not profitable, close position.")
             return 1
@@ -142,7 +163,7 @@ class HPStrategyV7(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         latest_candle = dataframe.iloc[-1].squeeze()
         previous_candle = dataframe.iloc[-2].squeeze()
-        return (Trade.get_open_trade_count() < self.open_trade_limit)
+        return (Trade.get_open_trade_count() < self.open_trade_limit.value)
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
