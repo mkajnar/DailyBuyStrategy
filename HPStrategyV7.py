@@ -22,7 +22,7 @@ import pandas_ta as pta
 
 class HPStrategyV7(IStrategy):
     INTERFACE_VERSION = 3
-    timeframe = '5m'
+    timeframe = '15m'
     leverage_value = 3
 
     minimal_roi = {
