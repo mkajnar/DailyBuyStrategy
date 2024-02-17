@@ -37,6 +37,8 @@ class HPStrategyV7(IStrategy):
                                          optimize=position_adjustment_enable)
     max_hold_time = IntParameter(1, 24, default=8, space='buy', optimize=True)
 
+    candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
+
     rolling_ha_treshold = IntParameter(3, 10, default=7, space='buy', optimize=True)
 
     is_optimize_32 = True
@@ -102,15 +104,21 @@ class HPStrategyV7(IStrategy):
             raise ValueError("DataFrame je prázdný")
         heiken_ashi = pd.DataFrame(index=dataframe.index)
         heiken_ashi['HA_Close'] = (dataframe['open'] + dataframe['high'] + dataframe['low'] + dataframe['close']) / 4
+
+        # První řádek pro HA_Open musí být stejný jako HA_Close, protože není předchozího řádku
         heiken_ashi['HA_Open'] = heiken_ashi['HA_Close'].shift(1)
         heiken_ashi['HA_Open'].iloc[0] = heiken_ashi['HA_Close'].iloc[0]
-        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['high'], how='inner').max(axis=1)
-        heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe['low'], how='inner').min(axis=1)
+
+        # Výpočet HA_High a HA_Low s použitím jen historických dat
+        heiken_ashi['HA_High'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe[['high']], how='inner').max(axis=1)
+        heiken_ashi['HA_Low'] = heiken_ashi[['HA_Open', 'HA_Close']].join(dataframe[['low']], how='inner').min(axis=1)
+
         # Aplikace klouzavého průměru
-        heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=self.rolling_ha_treshold.value).mean()
-        heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=self.rolling_ha_treshold.value).mean()
+        rolling_window = self.rolling_ha_treshold.value
+        heiken_ashi['HA_Close'] = heiken_ashi['HA_Close'].rolling(window=rolling_window).mean()
+        heiken_ashi['HA_Open'] = heiken_ashi['HA_Open'].rolling(window=rolling_window).mean()
+        heiken_ashi['HA_High'] = heiken_ashi['HA_High'].rolling(window=rolling_window).mean()
+        heiken_ashi['HA_Low'] = heiken_ashi['HA_Low'].rolling(window=rolling_window).mean()
 
         return heiken_ashi
 
@@ -143,8 +151,8 @@ class HPStrategyV7(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
         #     return False
-        # if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) > 0:
-        #     return self.should_already_sell(dataframe=dataframe)
+        if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) > 0:
+            return self.should_already_sell(dataframe=dataframe)
         if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
             return False
         if 'roi' in exit_reason and trade.calc_profit_ratio(rate) < 0:
@@ -286,11 +294,11 @@ class HPStrategyV7(IStrategy):
         if ((current_profit > (self.dca_threshold_pct.value * 3)) and (trade.nr_of_successful_exits == 0)):
             return -(trade.stake_amount / 2)
 
-        # if trade.id in self.last_dca_timeframe.keys():
-        #     td = current_time - self.last_dca_timeframe[trade.id]
-        #     if ((td.total_seconds() / 60)
-        #             < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
-        #         return None
+        if trade.id in self.last_dca_timeframe.keys():
+            td = current_time - self.last_dca_timeframe[trade.id]
+            if ((td.total_seconds() / 60)
+                    < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
+                return None
 
         filled_entries = trade.select_filled_orders(trade.entry_side)
         count_of_entries = trade.nr_of_successful_entries - trade.nr_of_successful_exits
