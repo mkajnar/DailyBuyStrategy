@@ -13,7 +13,8 @@ from pandas_ta import stdev
 
 from freqtrade.enums import ExitCheckTuple
 from freqtrade.persistence import Trade, Order
-from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, IStrategy, IntParameter)
+from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, IStrategy, IntParameter,
+                                informative)
 import datetime
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
@@ -23,11 +24,17 @@ import pandas_ta as pta
 class HPStrategyV7(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '15m'
-    leverage_value = 3
+    leverage_value = 5
 
     minimal_roi = {
         "0": 0.03
     }
+
+
+    to_kill = []
+
+    process_only_new_candles = True
+    startup_candle_count = 50
 
     is_opt_sl = True
     sl1 = DecimalParameter(0.01, 0.50, default=0.35, space='sell', decimals=2, optimize=is_opt_sl)
@@ -52,8 +59,8 @@ class HPStrategyV7(IStrategy):
 
     last_dca_timeframe = {}
     max_entry_position_adjustment = adjustments[leverage_value]
-    max_dca_multiplier = multis[max_entry_position_adjustment]
-    open_trade_limit = IntParameter(1, 20, default=5, space='buy', optimize=True)
+    max_dca_multiplier = multis[leverage_value]
+    open_trade_limit = IntParameter(1, 20, default=20, space='buy', optimize=True)
     is_opt_position_adjustment = True
 
     position_adjustment_enable = True
@@ -76,7 +83,7 @@ class HPStrategyV7(IStrategy):
     sell_deadfish_bb_factor = DecimalParameter(0.90, 1.20, default=1.0, space='sell', optimize=is_optimize_deadfish)
     sell_deadfish_volume_factor = DecimalParameter(1, 2.5, default=1.0, space='sell', optimize=is_optimize_deadfish)
 
-    trailing_stop_positive = 0.003
+    trailing_stop_positive = 0.001
     trailing_stop_positive_offset = 0.008
     stoploss = stoplosses[leverage_value]
 
@@ -92,7 +99,7 @@ class HPStrategyV7(IStrategy):
         'entry': 'market',
         'exit': 'market',
         'stoploss': 'market',
-        'stoploss_on_exchange': True
+        'stoploss_on_exchange': False
     }
 
     def leverage(self, pair: str, current_time: datetime, current_rate: float,
@@ -112,12 +119,11 @@ class HPStrategyV7(IStrategy):
             return r
 
         dca_count = trade.nr_of_successful_entries - trade.nr_of_successful_exits + 1
-        if current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value):
-            logging.info(f"Position for {pair} over time {self.max_hold_time.value} hours, close position.")
-            return 1
-        if dca_count >= self.max_entry_position_adjustment:
-            if current_profit < 0:
-                logging.info(f"Position for {pair} after {dca_count} DCA is not profitable, close position.")
+
+        if ((dca_count >= self.max_entry_position_adjustment)
+                and (current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value))):
+            logging.info(f"Position for {pair} is not profitable over time {self.max_hold_time.value} hours, signaling for close...")
+            self.to_kill.append(trade.id)
             return 1
 
     def calculate_heiken_ashi(self, dataframe):
@@ -172,6 +178,9 @@ class HPStrategyV7(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
         #     return False
+        if ((trade.calc_profit_ratio(rate) < 0)
+                and (trade.id in self.to_kill)):
+            return True
         if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) > 0:
             return self.should_already_sell(dataframe=dataframe)
         if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
@@ -190,6 +199,7 @@ class HPStrategyV7(IStrategy):
         return emadif
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
         dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
