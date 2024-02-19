@@ -44,7 +44,7 @@ class HPStrategyV7(IStrategy):
     sl10 = DecimalParameter(0.01, 0.20, default=0.15, space='sell', decimals=2, optimize=is_opt_sl)
     stoplosses = {1: -sl1.value, 3: -sl3.value, 5: -sl5.value, 10: -sl10.value}
 
-    is_partial_stoploss_used = False
+    is_partial_stoploss_used = True
     if is_partial_stoploss_used:
         partial_stoploss_koef = DecimalParameter(0.15, 1, default=0.3, space='sell', decimals=2,
                                                  optimize=is_partial_stoploss_used)
@@ -412,7 +412,7 @@ class HPStrategyV7(IStrategy):
         # ] = (1, 'swing_low')
 
         dataframe.loc[
-            (dataframe['Swing_Low'] > 0) & (dataframe['cci'] <= -100),
+            ((dataframe['Swing_Low'] > 0).rolling(2).sum() > 0) & (dataframe['cci'] <= -100),
             ['enter_long', 'enter_tag']
         ] = (1, 'swing_low')
         return dataframe
@@ -423,7 +423,7 @@ class HPStrategyV7(IStrategy):
         #               (dataframe['volume'] > 0), ['exit_long', 'exit_tag']] = (1, 'cci_sell')
 
         # dataframe.loc[(dataframe['swing_high'] > 0), ['exit_long', 'exit_tag']] = (1, 'swing_high')
-        dataframe.loc[(dataframe['Swing_High'] > 0), ['exit_long', 'exit_tag']] = (1, 'swing_high')
+        dataframe.loc[(dataframe['Swing_High'].rolling(2).sum() > 0), ['exit_long', 'exit_tag']] = (1, 'swing_high')
         return dataframe
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
