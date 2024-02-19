@@ -44,7 +44,7 @@ class HPStrategyV7(IStrategy):
     sl10 = DecimalParameter(0.01, 0.20, default=0.15, space='sell', decimals=2, optimize=is_opt_sl)
     stoplosses = {1: -sl1.value, 3: -sl3.value, 5: -sl5.value, 10: -sl10.value}
 
-    is_partial_stoploss_used = True
+    is_partial_stoploss_used = False
     if is_partial_stoploss_used:
         partial_stoploss_koef = DecimalParameter(0.15, 1, default=0.3, space='sell', decimals=2,
                                                  optimize=is_partial_stoploss_used)
