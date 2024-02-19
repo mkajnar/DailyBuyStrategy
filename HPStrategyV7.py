@@ -24,14 +24,14 @@ import pandas_ta as pta
 class HPStrategyV7(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '15m'
-    leverage_value = 5
+    leverage_value = 3
 
     minimal_roi = {
         "0": 0.03
     }
 
-
     to_kill = []
+    rebuy = {}
 
     process_only_new_candles = True
     startup_candle_count = 50
@@ -64,7 +64,8 @@ class HPStrategyV7(IStrategy):
     is_opt_position_adjustment = True
 
     position_adjustment_enable = True
-    dca_threshold_pct = DecimalParameter(0.01, 0.15, default=0.125, decimals=3, space='buy', optimize=position_adjustment_enable)
+    dca_threshold_pct = DecimalParameter(0.01, 0.15, default=0.125, decimals=3, space='buy',
+                                         optimize=position_adjustment_enable)
 
     max_hold_time = DecimalParameter(1, 24, default=8, space='sell', optimize=True, decimals=1)
     candles_before_dca = IntParameter(1, 10, default=5, space='buy', optimize=True)
@@ -90,7 +91,7 @@ class HPStrategyV7(IStrategy):
     fast_ewo = 100
     slow_ewo = 200
 
-    use_exit_signal = False
+    use_exit_signal = True
     ignore_roi_if_entry_signal = False
     use_custom_stoploss = True
     exit_profit_offset = 0.001 * leverage_value
@@ -111,20 +112,34 @@ class HPStrategyV7(IStrategy):
                         current_profit: float, **kwargs) -> float:
 
         if current_profit > self.trailing_stop_positive_offset:
-            logging.info(f"Checking CSL - {current_profit} for pair {pair} at rate {current_rate} - S1")
+            # logging.info(f"Checking CSL - {current_profit} for pair {pair} at rate {current_rate} - S1")
             new_stop_loss = current_profit - self.trailing_stop_positive
-            logging.info(f"Checking CSL - {new_stop_loss} for pair {pair} at rate {current_rate} - S2")
+            # logging.info(f"Checking CSL - {new_stop_loss} for pair {pair} at rate {current_rate} - S2")
             r = max(new_stop_loss, self.stoploss)
-            logging.info(f"Checking CSL - {r} for pair {pair} at rate {current_rate} - S3")
+            # logging.info(f"Checking CSL - {r} for pair {pair} at rate {current_rate} - S3")
             return r
 
         dca_count = trade.nr_of_successful_entries - trade.nr_of_successful_exits + 1
 
         if ((dca_count >= self.max_entry_position_adjustment)
                 and (current_time - trade.open_date_utc > datetime.timedelta(hours=self.max_hold_time.value))):
-            logging.info(f"Position for {pair} is not profitable over time {self.max_hold_time.value} hours, signaling for close...")
+            # logging.info(f"Position for {pair} is not profitable over time {self.max_hold_time.value} hours, signaling for close...")
             self.to_kill.append(trade.id)
             return 1
+
+        if current_profit > 0:
+            dataframe = self.dp.get_pair_dataframe(pair=pair, timeframe=self.timeframe)
+            # Výpočet lokálního minima pro posledních 20 svíček
+            local_min = dataframe['low'].rolling(window=20).min().iloc[-1]
+            # Ověření, že lokální minimum je menší než aktuální cena
+            if local_min < current_rate:
+                # Vypočítání stoplossu jako procentní rozdíl od aktuální ceny k lokálnímu minimu
+                stoploss_gap = (current_rate - local_min) / current_rate
+                custom_stoploss_value = -abs(stoploss_gap)  # Převod na negativní hodnotu pro stoploss
+                logging.info(
+                    f"XXXXXXX CSL SETTING SL {custom_stoploss_value} for pair {pair} at rate {current_rate} - S4")
+                return custom_stoploss_value
+        return self.stoploss
 
     def calculate_heiken_ashi(self, dataframe):
         if dataframe.empty:
@@ -174,21 +189,39 @@ class HPStrategyV7(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
-        logging.info(f"Checking CTE - {exit_reason} for pair {pair} at rate {rate} - S1")
+
+        # logging.info(f"Checking CTE - {exit_reason} for pair {pair} at rate {rate} - S1")
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
-        # if 'force_exit' in exit_reason and trade.calc_profit_ratio(rate) < 0:
-        #     return False
-        if ((trade.calc_profit_ratio(rate) < 0)
-                and (trade.id in self.to_kill)):
+        profit_ratio = trade.calc_profit_ratio(rate)
+
+        # logging.info(f"***** [[[ Checking CTE ]]] ***** - {exit_reason} for pair {pair} at rate {rate},\n"
+        #              f"Profit ratio: {profit_ratio} - S2")
+
+        # if profit_ratio < self.stoploss:
+        #     # logging.info(f"Exiting trade for {pair} due to stoploss condition with profit {profit_ratio}%")
+        #     return True
+
+        if (profit_ratio < 0) and (trade.id in self.to_kill):
+            self.to_kill.remove(trade.id)
             return True
-        if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) > 0:
-            return self.should_already_sell(dataframe=dataframe)
-        if 'trailing' in exit_reason and trade.calc_profit_ratio(rate) < 0:
-            return False
-        if 'roi' in exit_reason and trade.calc_profit_ratio(rate) < 0:
-            return False
-        if 'roi' in exit_reason and trade.calc_profit_ratio(rate) > 0:
-            return self.should_already_sell(dataframe=dataframe)
+
+        if 'swing' in exit_reason:
+            if profit_ratio > 0:
+                return True
+            if profit_ratio < 0:
+                return False
+
+        if 'trailing' in exit_reason:
+            if profit_ratio > 0:
+                return self.should_already_sell(dataframe=dataframe)
+            if profit_ratio < 0:
+                return False
+        if 'roi' in exit_reason:
+            if profit_ratio < 0:
+                return False
+            if profit_ratio > 0:
+                return self.should_already_sell(dataframe=dataframe)
+
         return True
 
     def ewo(self, dataframe, ema_length=5, ema2_length=35):
@@ -198,12 +231,35 @@ class HPStrategyV7(IStrategy):
         emadif = (ema1 - ema2) / df['close'] * 100
         return emadif
 
-    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+    def identify_swing_trend(self, dataframe: DataFrame, lookback: int) -> DataFrame:
+        dataframe['trend'] = 0
+        last_swing_high = last_swing_low = np.nan
+        for i in range(lookback, len(dataframe) - lookback):
+            max_range = dataframe['close'][i - lookback:i + lookback + 1].max()
+            min_range = dataframe['close'][i - lookback:i + lookback + 1].min()
+            if dataframe['close'][i] == max_range:
+                if np.isnan(last_swing_high) or dataframe['close'][i] > last_swing_high:
+                    dataframe.loc[i:, 'trend'] = 1  # Use .loc to correctly assign values
+                last_swing_high = dataframe['close'][i]
+            if dataframe['close'][i] == min_range:
+                if not np.isnan(last_swing_low) and dataframe['close'][i] < last_swing_low:
+                    dataframe.loc[i:, 'trend'] = 0  # Use .loc to correctly assign values
+                last_swing_low = dataframe['close'][i]
+        return dataframe
 
+    def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe = self.identify_swing_trend(dataframe, 5)
+        dataframe['swing_low'] = (
+                (dataframe['close'].shift(2) > dataframe['close'].shift(1)) &
+                (dataframe['close'].shift(1) < dataframe['close'])
+        ).astype(int)
+        dataframe['swing_high'] = (
+                (dataframe['close'].shift(2) < dataframe['close'].shift(1)) &
+                (dataframe['close'].shift(1) > dataframe['close'])
+        ).astype(int)
         dataframe['cci'] = ta.CCI(dataframe, timeperiod=14)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
         dataframe['atr'] = ta.ATR(dataframe, timeperiod=14)
-
         dataframe['sma_15'] = ta.SMA(dataframe, timeperiod=15)
         dataframe['cti'] = pta.cti(dataframe["close"], length=20)
         dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
@@ -264,22 +320,36 @@ class HPStrategyV7(IStrategy):
         return dataframe
 
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        conditions = []
-        dataframe.loc[:, 'enter_tag'] = ''
-        buy_1 = (
-                ((dataframe['rsi_slow'] < dataframe['rsi_slow'].shift(1)) &
-                 (dataframe['rsi_fast'] < self.buy_rsi_fast_32.value) &
-                 (dataframe['rsi'] > self.buy_rsi_32.value) &
-                 (dataframe['close'] < dataframe['sma_15'] * self.buy_sma15_32.value) &
-                 (dataframe['cti'] < self.buy_cti_32.value)) |
-                (qtpylib.crossed_above(dataframe['rsi_fast'], dataframe['rsi_slow']))
-        )
-        conditions.append(buy_1)
-        dataframe.loc[buy_1, 'enter_tag'] += 'buy_1'
-        if conditions:
-            dataframe.loc[
-                reduce(lambda x, y: x | y, conditions),
-                'enter_long'] = 1
+        # conditions = []
+        # dataframe.loc[:, 'enter_tag'] = ''
+        # buy_1 = (
+        #         ((dataframe['rsi_slow'] < dataframe['rsi_slow'].shift(1)) &
+        #          (dataframe['rsi_fast'] < self.buy_rsi_fast_32.value) &
+        #          (dataframe['rsi'] > self.buy_rsi_32.value) &
+        #          (dataframe['close'] < dataframe['sma_15'] * self.buy_sma15_32.value) &
+        #          (dataframe['cti'] < self.buy_cti_32.value)) |
+        #         (qtpylib.crossed_above(dataframe['rsi_fast'], dataframe['rsi_slow']))
+        # )
+        # conditions.append(buy_1)
+        # dataframe.loc[buy_1, 'enter_tag'] += 'buy_1'
+        # if conditions:
+        #     dataframe.loc[
+        #         reduce(lambda x, y: x | y, conditions),
+        #         'enter_long'] = 1
+
+        dataframe.loc[
+            (dataframe['swing_low'] > 0) & (dataframe['cci'] <= -100),
+            ['enter_long', 'enter_tag']
+        ] = (1, 'swing_low')
+
+        return dataframe
+
+    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        # dataframe.loc[(dataframe['cci'] > 100) &
+        #               (dataframe['rsi'] > 80) &
+        #               (dataframe['volume'] > 0), ['exit_long', 'exit_tag']] = (1, 'cci_sell')
+
+        dataframe.loc[(dataframe['swing_high'] > 0), ['exit_long', 'exit_tag']] = (1, 'swing_high')
 
         return dataframe
 
@@ -297,14 +367,6 @@ class HPStrategyV7(IStrategy):
                     'volume_mean_24'] * self.sell_deadfish_volume_factor.value)):
             return "sell_stoploss_deadfish"
 
-    def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
-        dataframe.loc[(dataframe['cci'] > 100) &
-                      (dataframe['rsi'] > 80) &
-                      (dataframe['volume'] > 0), ['exit_long', 'exit_tag']] = (1, 'cci_sell')
-        return dataframe
-
-        # This is called when placing the initial order (opening trade)
-
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
                             leverage: float, entry_tag: Optional[str], side: str,
@@ -318,38 +380,51 @@ class HPStrategyV7(IStrategy):
                               current_entry_profit: float, current_exit_profit: float,
                               **kwargs) -> Optional[float]:
 
-        dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
-        last_candle = dataframe.iloc[-1].squeeze()
-        previous_candle = dataframe.iloc[-2].squeeze()
+        try:
+            dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+            last_candle = dataframe.iloc[-1].squeeze()
+            previous_candle = dataframe.iloc[-2].squeeze()
 
-        if ((current_profit > (self.dca_threshold_pct.value * 3)) and (trade.nr_of_successful_exits == 0)):
-            return -(trade.stake_amount / 2)
-
-        if trade.id in self.last_dca_timeframe.keys():
-            td = current_time - self.last_dca_timeframe[trade.id]
-            if ((td.total_seconds() / 60)
-                    < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
-                return None
-
-        filled_entries = trade.select_filled_orders(trade.entry_side)
-        count_of_entries = trade.nr_of_successful_entries - trade.nr_of_successful_exits
-        if ((count_of_entries >= self.max_entry_position_adjustment) or
-                (last_candle['close'] < previous_candle['close']) or
-                (current_profit > -self.dca_threshold_pct.value)):
+            count_of_entries = trade.nr_of_successful_entries - trade.nr_of_successful_exits
+            filled_entries = trade.select_filled_orders(trade.entry_side)
+            if len(filled_entries) > 0:
+                first = filled_entries[0]
+                if first is not None:
+                    stake_amount = first.stake_amount
+                    if stake_amount is not None:
+                        if trade.pair in self.rebuy.keys():
+                            s = self.rebuy.pop(trade.pair)
+                            logging.info(f"***** ATP REBUY Increasing {trade.pair} position for {s} *****")
+                            return abs(s)
+                        if (current_profit < 0) and (current_profit < self.stoploss):
+                            self.last_dca_timeframe[trade.id] = current_time
+                            logging.info(
+                                f"***** ATP LOSS Lowering {trade.pair} position for {-(trade.stake_amount / 2)} *****")
+                            self.rebuy[trade.pair] = stake_amount / 3
+                            return -(stake_amount / 2)
+                        if ((current_profit > (self.dca_threshold_pct.value * count_of_entries))
+                                and (trade.nr_of_successful_exits == 0)):
+                            return -(stake_amount / 2)
+                        if trade.id in self.last_dca_timeframe.keys():
+                            td = current_time - self.last_dca_timeframe[trade.id]
+                            if ((td.total_seconds() / 60)
+                                    < (self.timeframe_to_minutes(self.timeframe) * self.candles_before_dca.value)):
+                                return None
+                        if ((count_of_entries >= self.max_entry_position_adjustment) or
+                                (last_candle['close'] < previous_candle['close']) or
+                                (current_profit > -self.dca_threshold_pct.value)):
+                            return None
+                        if (current_profit < -self.dca_threshold_pct.value * count_of_entries):
+                            try:
+                                self.last_dca_timeframe[trade.id] = current_time
+                                stake_amount = stake_amount * (1 + (count_of_entries * 0.25))
+                            except Exception as exception:
+                                stake_amount = 5
+                                pass
+                            return stake_amount
+                    return None
+        except:
             return None
-
-        if (current_profit < -self.dca_threshold_pct.value * count_of_entries):
-            try:
-                averaged_stake = filled_entries[0].stake_amount
-            except Exception as exception:
-                averaged_stake = 5
-                pass
-            if (count_of_entries > 0):
-                averaged_stake = (sum([entry.stake_amount
-                                       for entry in filled_entries if entry.stake_amount > 0]) / count_of_entries)
-            stake_amount = averaged_stake * (1 + (count_of_entries * 0.25))
-            self.last_dca_timeframe[trade.id] = current_time
-            return stake_amount
 
     def timeframe_to_minutes(self, timeframe: str) -> int:
         if 'm' in timeframe:
