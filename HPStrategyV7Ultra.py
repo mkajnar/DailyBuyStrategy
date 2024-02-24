@@ -15,7 +15,7 @@ from freqtrade.enums import ExitCheckTuple
 from freqtrade.persistence import Trade, Order
 from freqtrade.strategy import (BooleanParameter, CategoricalParameter, DecimalParameter, IStrategy, IntParameter,
                                 informative)
-import datetime
+from datetime import timedelta, datetime, timezone
 import talib.abstract as ta
 import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
@@ -24,12 +24,14 @@ import pandas_ta as pta
 class HPStrategyV7Ultra(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
-    leverage_value = 3
-    stoploss = -0.02 * leverage_value
+    leverage_value = 5
+    stoploss = -0.03 * leverage_value
 
     minimal_roi = {
         "0": 0.01 * leverage_value
     }
+
+    allprofits = {}
 
     process_only_new_candles = True
     startup_candle_count = 50
@@ -43,7 +45,7 @@ class HPStrategyV7Ultra(IStrategy):
     ignore_roi_if_entry_signal = True
 
     exit_profit_offset = 0.001 * leverage_value
-    exit_profit_only = True
+    exit_profit_only = False
 
     order_types = {
         'entry': 'market',
@@ -127,5 +129,26 @@ class HPStrategyV7Ultra(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         if 'swing' in exit_reason or 'trailing' in exit_reason:
-            return profit_ratio > 0
+            return profit_ratio > 0.005
+        logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}")
         return True
+
+    def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
+                    current_profit: float, **kwargs) -> Optional[Union[str, bool]]:
+
+        total_profit = 0
+        if len(self.allprofits.keys()) >= 0:
+            total_profit = sum(self.allprofits.values())
+        if current_profit != self.allprofits.get(pair, 0):
+            logging.info(f"[CE] Current profit: {current_profit} for {pair} is set to all profits dictionary")
+            self.allprofits[pair] = current_profit
+            logging.info(f"[CE] Total profit: {total_profit}")
+
+        c = len(self.allprofits.keys()) >= self.max_open_trades
+        if total_profit > 10 and c:
+            logging.info(f"[CE] Total profit: {total_profit} is bigger than 10, sell all positions...")
+            return True
+        if total_profit < -3 and c:
+            logging.info(f"[CE] Total profit: {total_profit} is less than -3, sell all positions...")
+            return True
+        return None
