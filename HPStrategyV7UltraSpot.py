@@ -124,16 +124,21 @@ class HPStrategyV7UltraSpot(IStrategy):
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
                            rate: float, time_in_force: str, exit_reason: str,
                            current_time: datetime, **kwargs) -> bool:
+        logging.info(f"[CTE] {pair} exit reason: {exit_reason}")
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         if 'swing' in exit_reason or 'trailing' in exit_reason:
-            return profit_ratio > self.exit_profit_offset_par.value
+            t = profit_ratio > self.exit_profit_offset
+            if t:
+                self.allprofits.pop(pair)
+                return profit_ratio > self.exit_profit_offset
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}")
+        self.allprofits.pop(pair)
         return True
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
                     current_profit: float, **kwargs) -> Optional[Union[str, bool]]:
-
+        logging.info(f"[CE] {pair} current profit: {current_profit}")
         total_profit = 0
         if len(self.allprofits.keys()) >= 0:
             total_profit = sum(self.allprofits.values())
@@ -146,9 +151,11 @@ class HPStrategyV7UltraSpot(IStrategy):
         if total_profit > self.total_positive_profit_threshold.value and c:
             logging.info(
                 f"[CE] Total profit: {total_profit} is bigger than {self.total_positive_profit_threshold.value}, sell all positions...")
+            self.allprofits.pop(pair)
             return True
         if total_profit < self.total_negative_profit_threshold.value and c:
             logging.info(
                 f"[CE] Total profit: {total_profit} is less than {self.total_negative_profit_threshold.value}, sell all positions...")
+            self.allprofits.pop(pair)
             return True
         return None
