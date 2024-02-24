@@ -43,8 +43,8 @@ class HPStrategyV7UltraSpot(IStrategy):
     ignore_roi_if_entry_signal = True
 
     donchian_period = IntParameter(10, 100, default=20, space='buy', optimize=True)
-    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=5.0, space='sell', decimals=1, optimize=True)
-    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-1.5, space='sell', decimals=1, optimize=True)
+    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=10, space='sell', decimals=1, optimize=True)
+    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-3, space='sell', decimals=1, optimize=True)
     exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
 
     exit_profit_offset = exit_profit_offset_par.value
@@ -128,12 +128,8 @@ class HPStrategyV7UltraSpot(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         if 'swing' in exit_reason or 'trailing' in exit_reason:
-            t = profit_ratio > self.exit_profit_offset
-            if t:
-                self.allprofits.pop(pair)
-                return profit_ratio > self.exit_profit_offset
+            return profit_ratio > self.exit_profit_offset
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}")
-        self.allprofits.pop(pair)
         return True
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
@@ -151,11 +147,9 @@ class HPStrategyV7UltraSpot(IStrategy):
         if total_profit > self.total_positive_profit_threshold.value and c:
             logging.info(
                 f"[CE] Total profit: {total_profit} is bigger than {self.total_positive_profit_threshold.value}, sell all positions...")
-            self.allprofits.pop(pair)
             return True
         if total_profit < self.total_negative_profit_threshold.value and c:
             logging.info(
                 f"[CE] Total profit: {total_profit} is less than {self.total_negative_profit_threshold.value}, sell all positions...")
-            self.allprofits.pop(pair)
             return True
         return None
