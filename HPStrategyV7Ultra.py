@@ -21,14 +21,13 @@ import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
 
 
-class HPStrategyV7Ultra(IStrategy):
+class HPStrategyV7UltraSpot(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
-    leverage_value = 5
-    stoploss = -0.03 * leverage_value
+    stoploss = -0.03
 
     minimal_roi = {
-        "0": 0.01 * leverage_value
+        "0": 0.01
     }
 
     allprofits = {}
@@ -38,13 +37,17 @@ class HPStrategyV7Ultra(IStrategy):
     position_adjustment_enable = False
     trailing_stop = True
     trailing_only_offset_is_reached = False
-    trailing_stop_positive = 0.001 * leverage_value
-    trailing_stop_positive_offset = 0.003 * leverage_value
-
+    trailing_stop_positive = 0.001
+    trailing_stop_positive_offset = 0.003
     use_exit_signal = True
     ignore_roi_if_entry_signal = True
 
-    exit_profit_offset = 0.001 * leverage_value
+    donchian_period = IntParameter(10, 100, default=20, space='buy', optimize=True)
+    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=5.0, space='sell', decimals=1, optimize=True)
+    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-1.5, space='sell', decimals=1, optimize=True)
+    exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
+
+    exit_profit_offset = exit_profit_offset_par.value
     exit_profit_only = False
 
     order_types = {
@@ -60,35 +63,30 @@ class HPStrategyV7Ultra(IStrategy):
         dataframe["midDon"] = (dataframe["upperDon"] + dataframe["lowerDon"]) / 2
         return dataframe
 
-    def mid_don_cross_over(self, dataframe, period: int = 20, shorts: bool = True):
+    def mid_don_cross_over(self, dataframe):
         dataframe["position_m"] = np.nan
         dataframe["position_m"] = np.where(dataframe["close"] > dataframe["midDon"], 1, dataframe["position_m"])
         dataframe["position_m"] = dataframe["position_m"].ffill().fillna(0)
         return dataframe
 
-    def don_channel_breakout(self, dataframe, period=20, shorts=True):
+    def don_channel_breakout(self, dataframe):
         dataframe["position_b"] = np.nan
         dataframe["position_b"] = np.where(dataframe["close"] > dataframe["upperDon"].shift(1), 1,
                                            dataframe["position_b"])
         dataframe["position_b"] = dataframe["position_b"].ffill().fillna(0)
         return dataframe
 
-    def don_reversal(self, dataframe, period=20, shorts=True):
+    def don_reversal(self, dataframe):
         dataframe["position_r"] = np.nan
         dataframe["position_r"] = np.where(dataframe["close"] < dataframe["lowerDon"].shift(1), 1,
                                            dataframe["position_r"])
         dataframe["position_r"] = dataframe["position_r"].ffill().fillna(0)
         return dataframe
 
-    def leverage(self, pair: str, current_time: datetime, current_rate: float,
-                 proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str,
-                 **kwargs) -> float:
-        return self.leverage_value
-
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Swing high/low
         dataframe = self.calc_swings(dataframe)
-        dataframe = self.calc_donchian_channels(dataframe=dataframe, period=20)
+        dataframe = self.calc_donchian_channels(dataframe=dataframe, period=self.donchian_period.value)
         dataframe = self.mid_don_cross_over(dataframe=dataframe)
         dataframe = self.don_reversal(dataframe=dataframe)
         dataframe = self.don_channel_breakout(dataframe=dataframe)
@@ -129,7 +127,7 @@ class HPStrategyV7Ultra(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         if 'swing' in exit_reason or 'trailing' in exit_reason:
-            return profit_ratio > 0.005
+            return profit_ratio > self.exit_profit_offset_par.value
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}")
         return True
 
@@ -145,10 +143,12 @@ class HPStrategyV7Ultra(IStrategy):
             logging.info(f"[CE] Total profit: {total_profit}")
 
         c = len(self.allprofits.keys()) >= self.max_open_trades
-        if total_profit > 10 and c:
-            logging.info(f"[CE] Total profit: {total_profit} is bigger than 10, sell all positions...")
+        if total_profit > self.total_positive_profit_threshold.value and c:
+            logging.info(
+                f"[CE] Total profit: {total_profit} is bigger than {self.total_positive_profit_threshold.value}, sell all positions...")
             return True
-        if total_profit < -3 and c:
-            logging.info(f"[CE] Total profit: {total_profit} is less than -3, sell all positions...")
+        if total_profit < self.total_negative_profit_threshold.value and c:
+            logging.info(
+                f"[CE] Total profit: {total_profit} is less than {self.total_negative_profit_threshold.value}, sell all positions...")
             return True
         return None
