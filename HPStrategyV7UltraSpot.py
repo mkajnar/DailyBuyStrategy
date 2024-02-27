@@ -131,11 +131,12 @@ class HPStrategyV7UltraSpot(IStrategy):
         if 'swing' in exit_reason or 'trailing' in exit_reason:
             confirm_sl = profit_ratio < -self.stoploss
             confirm_pf = profit_ratio > self.exit_profit_offset
-            if confirm_sl:
-                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
+            #if confirm_sl:
+            #    logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
             if confirm_pf:
                 logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
-            return confirm_sl or confirm_pf
+            #return confirm_sl or confirm_pf
+            return confirm_pf
         return True
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
