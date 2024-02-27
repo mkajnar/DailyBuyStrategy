@@ -1,5 +1,5 @@
 {
-  "strategy_name": "HPStrategyV7",
+  "strategy_name": "HPStrategyV7D",
   "params": {
     "roi": {
       "0": 0.03
