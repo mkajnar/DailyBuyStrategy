@@ -43,7 +43,7 @@ class HPStrategyV7UltraSpot(IStrategy):
     ignore_roi_if_entry_signal = True
 
     donchian_period = IntParameter(10, 100, default=20, space='buy', optimize=True)
-    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=10, space='sell', decimals=1, optimize=True)
+    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=15.0, space='sell', decimals=1, optimize=True)
     total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-3, space='sell', decimals=1, optimize=True)
     exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
 
@@ -127,9 +127,15 @@ class HPStrategyV7UltraSpot(IStrategy):
         logging.info(f"[CTE] {pair} exit reason: {exit_reason}")
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
+        logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, exit reason: {exit_reason}")
         if 'swing' in exit_reason or 'trailing' in exit_reason:
-            return profit_ratio > self.exit_profit_offset
-        logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}")
+            confirm_sl = profit_ratio < -self.stoploss
+            confirm_pf = profit_ratio > self.exit_profit_offset
+            if confirm_sl:
+                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
+            if confirm_pf:
+                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
+            return confirm_sl or confirm_pf
         return True
 
     def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
