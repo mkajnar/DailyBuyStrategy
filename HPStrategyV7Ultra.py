@@ -132,14 +132,17 @@ class HPStrategyV7Ultra(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, exit reason: {exit_reason}")
-        if 'swing' in exit_reason or 'trailing' in exit_reason:
+
+        if (exit_reason.startswith('stop') and 'loss' in exit_reason) or 'trailing' in exit_reason:
             confirm_sl = profit_ratio < -self.stoploss
+            if confirm_sl:
+                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
+                exit_reason = "stoploss"
+                return confirm_sl
+        if 'swing' in exit_reason or 'trailing' in exit_reason:
             confirm_pf = profit_ratio > self.exit_profit_offset
-            #if confirm_sl:
-            #    logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
             if confirm_pf:
                 logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
-            #return confirm_sl or confirm_pf
             return confirm_pf
         return True
 
