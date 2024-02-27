@@ -21,7 +21,7 @@ import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
 
 
-class HPStrategyV7(IStrategy):
+class HPStrategyV7DCA(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '15m'
     leverage_value = 3
