@@ -25,9 +25,9 @@ class HPStrategyV7Ultra(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
     leverage_value = 3
-    stoploss = -0.03 * leverage_value
+    stoploss = -0.08 * leverage_value
     minimal_roi = {
-        "0": 0.01 * leverage_value
+        "0": 0.007 * leverage_value
     }
     allprofits = {}
     process_only_new_candles = True
@@ -35,16 +35,16 @@ class HPStrategyV7Ultra(IStrategy):
     position_adjustment_enable = False
     trailing_stop = True
     trailing_only_offset_is_reached = False
-    trailing_stop_positive = 0.001 * leverage_value
-    trailing_stop_positive_offset = 0.003 * leverage_value
+    trailing_stop_positive = 0.003 * leverage_value
+    trailing_stop_positive_offset = 0.007 * leverage_value
 
     use_exit_signal = True
     ignore_roi_if_entry_signal = True
 
     donchian_period = IntParameter(5, 50, default=20, space='buy', optimize=True)
-    total_positive_profit_threshold = IntParameter(1, 16, default=15, space='sell', optimize=False)
-    total_negative_profit_threshold = IntParameter(-10, -1, default=-10, space='sell', optimize=False)
-    exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
+    total_positive_profit_threshold = IntParameter(1, 30, default=16, space='sell', optimize=True)
+    total_negative_profit_threshold = IntParameter(-30, -1, default=-10, space='sell', optimize=True)
+    exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.021, space='sell', decimals=3, optimize=True)
     exit_profit_offset = exit_profit_offset_par.value * leverage_value
 
     exit_profit_only = False
