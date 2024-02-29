@@ -33,6 +33,8 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     }
 
     allprofits = {}
+    candle_open_prices = {}
+
     process_only_new_candles = True
     startup_candle_count = 50
 
@@ -179,10 +181,19 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                               current_entry_profit: float, current_exit_profit: float,
                               **kwargs) -> Optional[float]:
         filled_entries = trade.select_filled_orders(trade.entry_side)
+
+        dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
+        last_candle = dataframe.iloc[-1]
+        candle_open_price = last_candle['open']
+        logging.info(f"[ADJ] {trade.pair} candle_open_price: {candle_open_price}")
+        if self.candle_open_prices.get(trade.pair, None) == candle_open_price:
+            logging.info(f"[ADJ] {trade.pair} candle_open_price: {candle_open_price} already processed")
+            return None
         if len(filled_entries) > self.dca_limit.value:
             return None
         try:
             if current_profit < -self.dca_threshold_pct.value:
+                self.candle_open_prices[trade.pair] = candle_open_price
                 self.csl[trade.pair] = (self.dca_threshold_pct.value * self.dca_threshold_pct_k.value)
                 logging.info(
                     f"[ADJ] {trade.pair} current SL adjusted to {self.csl[trade.pair]}, REBUY {trade.stake_amount * self.dca_multiplier.value} USDT")
