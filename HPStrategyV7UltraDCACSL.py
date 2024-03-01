@@ -48,15 +48,15 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     ignore_roi_if_entry_signal = False
     position_adjustment_enable = True
 
-    dca_threshold_pct_k = DecimalParameter(0.90, 0.99, default=0.95, decimals=2, space='buy',
+    dca_threshold_pct_k = DecimalParameter(0.90, 0.99, default=0.94, decimals=2, space='buy',
                                            optimize=position_adjustment_enable)
-    dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.25, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.3, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
-    dca_multiplier = DecimalParameter(0.5, 3, default=1.5, decimals=2, space='buy',
+    dca_multiplier = DecimalParameter(0.5, 3, default=2.71, decimals=2, space='buy',
                                       optimize=position_adjustment_enable)
-    dca_limit = IntParameter(1, 5, default=3, space='buy',
+    dca_limit = IntParameter(1, 5, default=1, space='buy',
                              optimize=position_adjustment_enable)
-    donchian_period = IntParameter(5, 50, default=20, space='buy',
+    donchian_period = IntParameter(5, 50, default=23, space='buy',
                                    optimize=True)
 
     exit_profit_offset = 0.001
