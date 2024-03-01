@@ -21,33 +21,32 @@ import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
 
 
-class HPStrategyV7UltraSpot(IStrategy):
+class HPStrategyV7Ultra(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
-    stoploss = -0.03
-
+    leverage_value = 3
+    stoploss = -0.08 * leverage_value
     minimal_roi = {
-        "0": 0.01
+        "0": 0.007 * leverage_value
     }
-
     allprofits = {}
-
     process_only_new_candles = True
     startup_candle_count = 50
     position_adjustment_enable = False
     trailing_stop = True
     trailing_only_offset_is_reached = False
-    trailing_stop_positive = 0.001
-    trailing_stop_positive_offset = 0.003
+    trailing_stop_positive = 0.003 * leverage_value
+    trailing_stop_positive_offset = 0.007 * leverage_value
+
     use_exit_signal = True
     ignore_roi_if_entry_signal = True
 
-    donchian_period = IntParameter(10, 100, default=20, space='buy', optimize=True)
-    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=15.0, space='sell', decimals=1, optimize=True)
-    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-3, space='sell', decimals=1, optimize=True)
-    exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
+    donchian_period = IntParameter(5, 50, default=20, space='buy', optimize=True)
+    total_positive_profit_threshold = IntParameter(1, 30, default=16, space='sell', optimize=True)
+    total_negative_profit_threshold = IntParameter(-30, -1, default=-10, space='sell', optimize=True)
+    exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.021, space='sell', decimals=3, optimize=True)
+    exit_profit_offset = exit_profit_offset_par.value * leverage_value
 
-    exit_profit_offset = exit_profit_offset_par.value
     exit_profit_only = False
 
     order_types = {
@@ -82,6 +81,11 @@ class HPStrategyV7UltraSpot(IStrategy):
                                            dataframe["position_r"])
         dataframe["position_r"] = dataframe["position_r"].ffill().fillna(0)
         return dataframe
+
+    def leverage(self, pair: str, current_time: datetime, current_rate: float,
+                 proposed_leverage: float, max_leverage: float, entry_tag: Optional[str], side: str,
+                 **kwargs) -> float:
+        return self.leverage_value
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Swing high/low
@@ -128,14 +132,17 @@ class HPStrategyV7UltraSpot(IStrategy):
         dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
         profit_ratio = trade.calc_profit_ratio(rate)
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, exit reason: {exit_reason}")
-        if 'swing' in exit_reason or 'trailing' in exit_reason:
+
+        if (exit_reason.startswith('stop') and 'loss' in exit_reason) or 'trailing' in exit_reason:
             confirm_sl = profit_ratio < -self.stoploss
+            if confirm_sl:
+                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
+                exit_reason = "stoploss"
+                return confirm_sl
+        if 'swing' in exit_reason or 'trailing' in exit_reason:
             confirm_pf = profit_ratio > self.exit_profit_offset
-            #if confirm_sl:
-            #    logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed stoploss {self.stoploss}")
             if confirm_pf:
                 logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
-            #return confirm_sl or confirm_pf
             return confirm_pf
         return True
 

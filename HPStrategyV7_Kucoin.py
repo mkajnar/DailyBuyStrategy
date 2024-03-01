@@ -21,7 +21,7 @@ import freqtrade.vendor.qtpylib.indicators as qtpylib
 import pandas_ta as pta
 
 
-class HPStrategyV7UltraSpot(IStrategy):
+class HPStrategyV7_Kucoin(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
     stoploss = -0.03
@@ -43,8 +43,8 @@ class HPStrategyV7UltraSpot(IStrategy):
     ignore_roi_if_entry_signal = True
 
     donchian_period = IntParameter(10, 100, default=20, space='buy', optimize=True)
-    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=15.0, space='sell', decimals=1, optimize=True)
-    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-3, space='sell', decimals=1, optimize=True)
+    total_positive_profit_threshold = DecimalParameter(0.1, 30, default=5.0, space='sell', decimals=1, optimize=True)
+    total_negative_profit_threshold = DecimalParameter(-10.0, -0.1, default=-1, space='sell', decimals=1, optimize=True)
     exit_profit_offset_par = DecimalParameter(0.001, 0.05, default=0.001, space='sell', decimals=3, optimize=True)
 
     exit_profit_offset = exit_profit_offset_par.value
