@@ -50,7 +50,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
     dca_threshold_pct_k = DecimalParameter(0.90, 0.99, default=0.94, decimals=2, space='buy',
                                            optimize=position_adjustment_enable)
-    dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.3, decimals=2, space='buy',
+    dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.3 / leverage_value, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
     dca_multiplier = DecimalParameter(0.5, 3, default=2.71, decimals=2, space='buy',
                                       optimize=position_adjustment_enable)
