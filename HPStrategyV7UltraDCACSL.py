@@ -59,7 +59,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     donchian_period = IntParameter(5, 50, default=23, space='buy',
                                    optimize=True)
 
-    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.03, decimals=2, space='sell', optimize=True)
+    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.38, decimals=2, space='sell', optimize=True)
 
     exit_profit_offset = 0.001
     exit_profit_only = False
