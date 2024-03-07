@@ -64,7 +64,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
     cci_treshold = IntParameter(-200, -10, default=-100, space='buy', optimize=True)
 
-    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.03, decimals=2, space='sell', optimize=True)
+    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.32, decimals=2, space='sell', optimize=True)
 
     pct3_buy_threshold = DecimalParameter(-0.999, -0.005, default=-0.03, decimals=3, space='buy', optimize=True)
 
