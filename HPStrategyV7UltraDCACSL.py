@@ -35,6 +35,8 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     allprofits = {}
     candle_open_prices = {}
 
+    max_open_trades = 20
+
     process_only_new_candles = True
     startup_candle_count = 50
 
@@ -71,6 +73,12 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     red_candles_before_buy = IntParameter(1, 5, default=1, space='buy', optimize=True)
 
     candle_time_threshold = DecimalParameter(0.01, 1, default=0.36, decimals=2, space='buy', optimize=False)
+
+    trade_timeout = IntParameter(1, 48, default=12, space='sell', optimize=True)
+
+    max_tradable_ratio = DecimalParameter(0.01, 1, default=0.5, space='buy', optimize=True)
+
+    max_trades = IntParameter(1, 30, default=max_open_trades, space='buy', optimize=True)
 
     exit_profit_offset = 0.001
     exit_profit_only = False
@@ -232,14 +240,21 @@ class HPStrategyV7UltraDCACSL(IStrategy):
         else:
             return self.stoploss
 
+    # def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
+    #                         proposed_stake: float, min_stake: Optional[float], max_stake: float,
+    #                         leverage: float, entry_tag: Optional[str], side: str,
+    #                         **kwargs) -> float:
+    #     t = proposed_stake * (self.leverage_value / 10)
+    #     if t < min_stake:
+    #         return min_stake
+    #     return t
+
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
                             leverage: float, entry_tag: Optional[str], side: str,
                             **kwargs) -> float:
-        t = proposed_stake / self.dca_limit.value + 1
-        if t < min_stake:
-            return min_stake
-        return t
+        max_total_stake = max_stake * self.max_tradable_ratio.value
+        return min(max_stake, max_total_stake / self.max_trades.value)
 
     def adjust_trade_position(self, trade: Trade, current_time: datetime,
                               current_rate: float, current_profit: float,
