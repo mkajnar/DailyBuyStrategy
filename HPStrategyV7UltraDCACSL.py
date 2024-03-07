@@ -52,14 +52,23 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                                            optimize=position_adjustment_enable)
     dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.3 / leverage_value, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
+
     dca_multiplier = DecimalParameter(0.5, 3, default=2.71, decimals=2, space='buy',
                                       optimize=position_adjustment_enable)
-    dca_limit = IntParameter(1, 5, default=1, space='buy',
-                             optimize=position_adjustment_enable)
-    donchian_period = IntParameter(5, 50, default=23, space='buy',
-                                   optimize=True)
 
-    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.38, decimals=2, space='sell', optimize=True)
+    dca_limit = IntParameter(1, 5, default=1, space='buy', optimize=position_adjustment_enable)
+
+    donchian_period = IntParameter(5, 50, default=23, space='buy', optimize=True)
+
+    rsi_treshold = IntParameter(10, 50, default=35, space='buy', optimize=True)
+
+    cci_treshold = IntParameter(-200, -10, default=-100, space='buy', optimize=True)
+
+    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.03, decimals=2, space='sell', optimize=True)
+
+    red_candles_before_buy = IntParameter(1, 5, default=1, space='buy', optimize=True)
+
+    candle_time_threshold = DecimalParameter(0.01, 1, default=0.36, decimals=2, space='buy', optimize=False)
 
     exit_profit_offset = 0.001
     exit_profit_only = False
@@ -112,6 +121,8 @@ class HPStrategyV7UltraDCACSL(IStrategy):
         return dataframe
 
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+        dataframe['rsi'] = ta.RSI(dataframe, timeperiod=14)
+        dataframe['cci'] = ta.CCI(dataframe, timeperiod=20)
         # Swing high/low
         dataframe = self.calc_swings(dataframe)
         dataframe = self.calc_donchian_channels(dataframe=dataframe, period=self.donchian_period.value)
@@ -128,16 +139,44 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                                   (dataframe['close'].shift(1) > dataframe['close']).astype(int)
         return dataframe
 
+    def check_red_candles(self, dataframe: DataFrame, n: int) -> DataFrame:
+        red_candle = dataframe['close'] < dataframe['open']
+        dataframe.loc[:, 'red_candles_in_row'] = red_candle.rolling(window=n).sum() == n
+        return dataframe
+
+    def timeframe_to_minutes(self, timeframe: str) -> int:
+        if 'm' in timeframe:
+            return int(timeframe.replace('m', ''))
+        elif 'h' in timeframe:
+            return int(timeframe.replace('h', '')) * 60
+        elif 'd' in timeframe:
+            return int(timeframe.replace('d', '')) * 1440
+        else:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+    def is_candle_open_more_than_threshold(self, dataframe: DataFrame, threshold: float) -> DataFrame:
+        candle_timeframe_minutes = self.timeframe_to_minutes(timeframe=self.timeframe)
+        t_time = pd.to_timedelta(candle_timeframe_minutes * threshold, unit='minutes')
+        current_time = pd.Timestamp.utcnow()
+        dataframe.loc[:, 'time_since_open'] = current_time - dataframe['date']
+        dataframe.loc[:, 'is_open_more_than_threshold'] = dataframe['time_since_open'] >= t_time
+        return dataframe
+
     def populate_entry_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
+
+        self.check_red_candles(dataframe, self.red_candles_before_buy.value)
+        self.is_candle_open_more_than_threshold(dataframe, threshold=self.candle_time_threshold.value)
+
         dataframe.loc[
             (
-                    (dataframe['position_r'] == 1)
-                    |
-                    (dataframe['swing_low'] == 1)
-                    |
-                    (dataframe['position_m'] == 1)
-                    |
-                    (dataframe['position_b'] == 1)
+                    # ((dataframe['position_r'] == 1) |
+                    #  (dataframe['swing_low'] == 1) |
+                    #  (dataframe['position_m'] == 1) |
+                    #  (dataframe['position_b'] == 1)) &
+                    (dataframe['red_candles_in_row'] &
+                     dataframe['is_open_more_than_threshold'] &
+                     (dataframe['rsi'] < self.rsi_treshold.value) &
+                     (dataframe['cci'] < self.cci_treshold.value))
             ), ['enter_long', 'enter_tag']
         ] = (1, 'swing_low')
         return dataframe
@@ -175,7 +214,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                 logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
             return confirm_pf
 
-        if 'stop_loss' in exit_reason or 'kick_off' in exit_reason:
+        if 'stop_loss' in exit_reason or 'kick_off' in exit_reason or 'force' in exit_reason:
             return True
 
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, reason: {exit_reason} not confirmed")
@@ -193,7 +232,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
                             leverage: float, entry_tag: Optional[str], side: str,
                             **kwargs) -> float:
-        t = proposed_stake / self.dca_limit.value
+        t = proposed_stake / self.dca_limit.value + 1
         if t < min_stake:
             return min_stake
         return t
