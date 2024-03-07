@@ -59,6 +59,8 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     donchian_period = IntParameter(5, 50, default=23, space='buy',
                                    optimize=True)
 
+    kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.03, decimals=2, space='sell', optimize=True)
+
     exit_profit_offset = 0.001
     exit_profit_only = False
 
@@ -100,6 +102,15 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                  **kwargs) -> float:
         return self.leverage_value
 
+    def calculate_price_change_coefficient(self, dataframe: DataFrame, candles_count: int = 1) -> DataFrame:
+        dataframe['price_change_pct'] = dataframe['close'].pct_change(periods=candles_count)
+        dataframe['price_change_coeff'] = dataframe['price_change_pct'].apply(
+            lambda x: max(min(x, 0.99), -0.99) if x != 0 else 0.01 * np.sign(x)
+        )
+        dataframe[f'price_change_coeff_{candles_count}'] = dataframe['price_change_coeff'].rolling(
+            window=candles_count).mean() * self.leverage_value
+        return dataframe
+
     def populate_indicators(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         # Swing high/low
         dataframe = self.calc_swings(dataframe)
@@ -107,6 +118,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
         dataframe = self.mid_don_cross_over(dataframe=dataframe)
         dataframe = self.don_reversal(dataframe=dataframe)
         dataframe = self.don_channel_breakout(dataframe=dataframe)
+        dataframe = self.calculate_price_change_coefficient(dataframe, 3)
         return dataframe
 
     def calc_swings(self, dataframe):
@@ -130,12 +142,24 @@ class HPStrategyV7UltraDCACSL(IStrategy):
         ] = (1, 'swing_low')
         return dataframe
 
+    def custom_exit(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
+                    current_profit: float, **kwargs) -> Optional[Union[str, bool]]:
+        dataframe, _ = self.dp.get_analyzed_dataframe(pair, self.timeframe)
+        last_candle = dataframe.iloc[-1].squeeze()
+        if last_candle['price_change_coeff_3'] <= self.kick_off_threshold.value:
+            return 'kick_off'
+
     def populate_exit_trend(self, dataframe: DataFrame, metadata: dict) -> DataFrame:
         dataframe.loc[
             (
                 (dataframe['swing_high'] == 1)
             ), ['exit_long', 'exit_tag']
         ] = (1, 'swing_high')
+        dataframe.loc[
+            (
+                (dataframe['price_change_coeff_3'] <= self.kick_off_threshold.value)
+            ), ['exit_long', 'exit_tag']
+        ] = (1, 'kick_off')
         return dataframe
 
     def confirm_trade_exit(self, pair: str, trade: Trade, order_type: str, amount: float,
@@ -151,7 +175,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                 logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
             return confirm_pf
 
-        if 'stop_loss' in exit_reason:
+        if 'stop_loss' in exit_reason or 'kick_off' in exit_reason:
             return True
 
         logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, reason: {exit_reason} not confirmed")
