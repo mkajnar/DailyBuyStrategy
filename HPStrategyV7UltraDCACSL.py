@@ -66,6 +66,8 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
     kick_off_threshold = DecimalParameter(-0.99, 0, default=-0.03, decimals=2, space='sell', optimize=True)
 
+    pct3_buy_threshold = DecimalParameter(-0.999, -0.005, default=-0.03, decimals=3, space='buy', optimize=True)
+
     red_candles_before_buy = IntParameter(1, 5, default=1, space='buy', optimize=True)
 
     candle_time_threshold = DecimalParameter(0.01, 1, default=0.36, decimals=2, space='buy', optimize=False)
@@ -169,14 +171,16 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
         dataframe.loc[
             (
-                    # ((dataframe['position_r'] == 1) |
-                    #  (dataframe['swing_low'] == 1) |
-                    #  (dataframe['position_m'] == 1) |
-                    #  (dataframe['position_b'] == 1)) &
-                    (dataframe['red_candles_in_row'] &
-                     dataframe['is_open_more_than_threshold'] &
-                     (dataframe['rsi'] < self.rsi_treshold.value) &
-                     (dataframe['cci'] < self.cci_treshold.value))
+                # ((dataframe['position_r'] == 1) |
+                #  (dataframe['swing_low'] == 1) |
+                #  (dataframe['position_m'] == 1) |
+                #  (dataframe['position_b'] == 1)) &
+                    dataframe['red_candles_in_row'] &
+                    dataframe['is_open_more_than_threshold'] &
+                    (dataframe['rsi'] < self.rsi_treshold.value) &
+                    (dataframe['cci'] < self.cci_treshold.value) &
+                    (dataframe['price_change_coeff_3'] < self.pct3_buy_threshold.value)
+
             ), ['enter_long', 'enter_tag']
         ] = (1, 'swing_low')
         return dataframe
