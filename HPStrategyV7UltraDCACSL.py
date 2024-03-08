@@ -25,7 +25,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     INTERFACE_VERSION = 3
     timeframe = '5m'
     leverage_value = 3
-    stoploss = -1
+    stoploss = -0.3
 
     csl = {}
     minimal_roi = {
