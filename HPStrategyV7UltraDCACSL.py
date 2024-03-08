@@ -187,7 +187,10 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                     dataframe['is_open_more_than_threshold'] &
                     (dataframe['rsi'] < self.rsi_treshold.value) &
                     (dataframe['cci'] < self.cci_treshold.value) &
-                    (dataframe['price_change_coeff_3'] < self.pct3_buy_threshold.value)
+                    (
+                        (dataframe['price_change_coeff_3'] < self.pct3_buy_threshold.value) |
+                        (dataframe['price_change_coeff_3'] > abs(self.pct3_buy_threshold.value))
+                    )
 
             ), ['enter_long', 'enter_tag']
         ] = (1, 'swing_low')
