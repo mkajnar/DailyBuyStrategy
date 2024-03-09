@@ -4,3 +4,4 @@
 /user_data/logs
 /user_data/*.sqlite*
 /user_data/backtest_results
+/user_data/strategies/__pycache__/*.pyc
