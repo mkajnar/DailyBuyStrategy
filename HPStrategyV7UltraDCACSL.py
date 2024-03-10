@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+import json
 from functools import reduce
 
 import numpy
@@ -22,6 +23,7 @@ import pandas_ta as pta
 
 
 class HPStrategyV7UltraDCACSL(IStrategy):
+
     INTERFACE_VERSION = 3
     timeframe = '5m'
     leverage_value = 3
@@ -45,15 +47,19 @@ class HPStrategyV7UltraDCACSL(IStrategy):
     trailing_stop_positive = 0.003 * leverage_value
     trailing_stop_positive_offset = 0.007 * leverage_value
 
-    use_exit_signal = True
+    use_exit_signal = False
     use_custom_stoploss = True
     ignore_roi_if_entry_signal = False
     position_adjustment_enable = True
+
+    custom_tp_pct = DecimalParameter(0.005, 0.50, default=0.005, decimals=3, space='sell', optimize=True)
 
     dca_threshold_pct_k = DecimalParameter(0.90, 0.99, default=0.94, decimals=2, space='buy',
                                            optimize=position_adjustment_enable)
     dca_threshold_pct = DecimalParameter(0.1, 0.5, default=0.3 / leverage_value, decimals=2, space='buy',
                                          optimize=position_adjustment_enable)
+
+    stoploss = dca_threshold_pct.value - 1.25
 
     dca_multiplier = DecimalParameter(0.5, 3, default=2.71, decimals=2, space='buy',
                                       optimize=position_adjustment_enable)
@@ -76,7 +82,7 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
     trade_timeout = IntParameter(1, 48, default=12, space='sell', optimize=True)
 
-    max_tradable_ratio = DecimalParameter(0.01, 1, default=0.5, space='buy', optimize=True)
+    max_tradable_ratio = DecimalParameter(0.01, 1, default=0.75, space='buy', optimize=True)
 
     max_trades = IntParameter(1, 30, default=max_open_trades, space='buy', optimize=True)
 
@@ -232,32 +238,24 @@ class HPStrategyV7UltraDCACSL(IStrategy):
 
         if 'swing' in exit_reason or 'trailing' in exit_reason:
             confirm_pf = profit_ratio > self.exit_profit_offset
-            if confirm_pf:
-                logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, confirmed profit {profit_ratio}")
             return confirm_pf
 
         if 'stop_loss' in exit_reason or 'kick_off' in exit_reason or 'force' in exit_reason:
             return True
 
-        logging.info(f"[CTE] {pair} profit ratio: {profit_ratio}, reason: {exit_reason} not confirmed")
-        return False
+        return True
 
-    def custom_stoploss(self, pair: str, trade: Trade, current_time: datetime, current_rate: float,
-                        current_profit: float, after_fill: bool, **kwargs) -> Optional[float]:
-        if pair in self.csl.keys():
-            logging.info(f"[SPL] {pair} current profit: {current_profit}% has a stop loss -{self.csl[pair]}%")
-            return -self.csl[pair]
-        else:
-            return self.stoploss
 
-    # def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
-    #                         proposed_stake: float, min_stake: Optional[float], max_stake: float,
-    #                         leverage: float, entry_tag: Optional[str], side: str,
-    #                         **kwargs) -> float:
-    #     t = proposed_stake * (self.leverage_value / 10)
-    #     if t < min_stake:
-    #         return min_stake
-    #     return t
+
+    def custom_stoploss(self, pair: str, trade: 'Trade', current_time: datetime,
+                        current_rate: float, current_profit: float, **kwargs) -> float:
+        try:
+            if pair in self.csl.keys():
+                o = json.loads(self.csl[pair])
+                return o.get('sl', self.stoploss)
+        except:
+            pass
+        return self.stoploss
 
     def custom_stake_amount(self, pair: str, current_time: datetime, current_rate: float,
                             proposed_stake: float, min_stake: Optional[float], max_stake: float,
@@ -272,26 +270,50 @@ class HPStrategyV7UltraDCACSL(IStrategy):
                               current_entry_rate: float, current_exit_rate: float,
                               current_entry_profit: float, current_exit_profit: float,
                               **kwargs) -> Optional[float]:
-        filled_entries = trade.select_filled_orders(trade.entry_side)
 
         dataframe, _ = self.dp.get_analyzed_dataframe(trade.pair, self.timeframe)
         last_candle = dataframe.iloc[-1]
+
         candle_open_price = last_candle['open']
-        logging.info(f"[ADJ] {trade.pair} candle_open_price: {candle_open_price}")
         if self.candle_open_prices.get(trade.pair, None) == candle_open_price:
-            logging.info(f"[ADJ] {trade.pair} candle_open_price: {candle_open_price} already processed")
             return None
+
+        if trade.open_rate != current_rate:
+            try:
+                if trade.pair in self.csl.keys():
+                    o = json.loads(self.csl[trade.pair])
+                    tp = o.get('tp', None)
+                    if tp is not None and current_rate >= tp:
+                        logging.info(f"Hit {trade.pair} to TP: {self.csl[trade.pair]}, at {current_rate}")
+                        o['tp'] = None
+                        o['sl'] = None
+                        self.csl[trade.pair] = json.dumps(o)
+                        return -trade.stake_amount
+            except:
+                pass
+
+        filled_entries = trade.select_filled_orders(trade.entry_side)
         if len(filled_entries) > self.dca_limit.value:
             return None
+
+        new_stop_loss_price = trade.open_rate * (1 + self.stoploss)
+        tp_price = trade.open_rate * (1 + self.custom_tp_pct.value)
+        info = {
+            "sl": new_stop_loss_price,
+            "tp": tp_price
+        }
+        self.csl[trade.pair] = json.dumps(info)
+        # logging.info(f"Updated CSL: {self.csl[trade.pair]}")
+
         try:
-            if current_profit < -self.dca_threshold_pct.value:
+            if current_rate <= (trade.open_rate * (1 - self.dca_threshold_pct.value)):
                 self.candle_open_prices[trade.pair] = candle_open_price
-                self.csl[trade.pair] = (self.dca_threshold_pct.value * self.dca_threshold_pct_k.value)
-                logging.info(
-                    f"[ADJ] {trade.pair} current SL adjusted to {self.csl[trade.pair]}, REBUY {trade.stake_amount * self.dca_multiplier.value} USDT")
-                return trade.stake_amount * self.dca_multiplier.value
-            else:
-                self.csl[trade.pair] = (self.dca_threshold_pct.value * 1.25)
-                return None
+                p = trade.stake_amount * self.dca_multiplier.value
+                # logging.info(
+                #     f"[ADJ] {trade.pair} current SL adjusted to {self.csl[trade.pair]}, REBUY {p} USDT")
+                return p
+
         except Exception as e:
-            return None
+            pass
+
+        return None
