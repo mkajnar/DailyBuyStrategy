@@ -16,7 +16,7 @@ services:
       --logfile /freqtrade/user_data/logs/freqtrade.log
       --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
       --config /freqtrade/user_data/config.json
-      --strategy HPStrategyV6
+      --strategy DailyBuyStrategy3
 
   freqtrade_hps_backtest:
     image: freqtradeorg/freqtrade:develop
