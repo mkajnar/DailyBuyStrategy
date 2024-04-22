@@ -1,5 +1,5 @@
 {
-  "strategy_name": "DailyBuyStrategy3",
+  "strategy_name": "HPStrategyV7UltraDcaV10.py",
   "params": {
     "roi": {
       "0": 0.10,
