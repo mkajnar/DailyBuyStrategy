@@ -30,8 +30,6 @@ class DailyBuyStrategy3_2_KC(IStrategy):
         "0": 0.03
     }
 
-    leverage_value = 2
-
     timeframe_hierarchy = {
         '1m': '5m',
         '5m': '15m',
@@ -100,11 +98,6 @@ class DailyBuyStrategy3_2_KC(IStrategy):
         pairs = self.dp.current_whitelist()
         informative_pairs = [(pair, timeframe) for pair in pairs for timeframe in self.timeframe_hierarchy.keys()]
         return informative_pairs
-
-    def leverage(self, pair: str, current_time: datetime, current_rate: float,
-                 proposed_leverage: float, max_leverage: float, entry_tag: Optional[str],
-                 side: str, **kwargs) -> float:
-        return self.leverage_value
 
     def calculate_swing(self, dataframe):
         swing_low = pd.Series(
