@@ -1,10 +1,10 @@
 ---
 version: '3'
 services:
-  freqtrade_hps:
+  freqtrade_bbt:
     image: freqtradeorg/freqtrade:develop
     restart: unless-stopped
-    container_name: freqtrade_hps
+    container_name: freqtrade_bbt
     volumes:
       - "./user_data:/freqtrade/user_data:rw"
       - "/etc/localtime:/etc/localtime:ro"
@@ -14,6 +14,23 @@ services:
     command: >
       trade
       --logfile /freqtrade/user_data/logs/freqtrade.log
+      --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
+      --config /freqtrade/user_data/config.json
+      --strategy DailyBuyStrategy3_2
+
+  freqtrade_kcs:
+    image: freqtradeorg/freqtrade:develop
+    restart: unless-stopped
+    container_name: freqtrade_kcs
+    volumes:
+      - "./user_data:/freqtrade/user_data:rw"
+      - "/etc/localtime:/etc/localtime:ro"
+      - "./user_data/config_kucoin.json:/freqtrade/user_data/config.json"
+    ports:
+      - "8081:8080"
+    command: >
+      trade
+      --logfile /freqtrade/user_data/logs/freqtrade_kcs.log
       --db-url sqlite:////freqtrade/user_data/tradesv3.sqlite
       --config /freqtrade/user_data/config.json
       --strategy DailyBuyStrategy3_2
