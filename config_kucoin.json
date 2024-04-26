@@ -1,1 +1,106 @@
+{
+    "max_open_trades": 20,
+    "amend_last_stake_amount": true,
+    "stake_currency": "USDT",
+    "stake_amount": "unlimited",
+    "tradable_balance_ratio": 0.99,
+    "fiat_display_currency": "USD",
+    "timeframe": "5m",
+    "dry_run": false,
+    "dry_run_wallet": 366,
+    "cancel_open_orders_on_exit": false,
+    "trading_mode": "spot",
+    "margin_mode": "isolated",
+    "use_exit_signal": false,
+    "unfilledtimeout": {
+        "entry": 10,
+        "exit": 10,
+        "exit_timeout_count": 0,
+        "unit": "minutes"
+    },
+    "entry_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1,
+        "price_last_balance": 0.0,
+        "check_depth_of_market": {
+            "enabled": false,
+            "bids_to_ask_delta": 1
+        }
+    },
+    "exit_pricing": {
+        "price_side": "other",
+        "use_order_book": true,
+        "order_book_top": 1
+    },
+    "exchange": {
+        "name": "kucoin",
+        "key": "",
+        "secret": "",
+        "_password": "",
+        "ccxt_config": {
+            "enableRateLimit": true,
+            "timeout": 10000
+        },
+        "ccxt_async_config": {
+            "enableRateLimit": true,
+            "timeout": 10000
+        },
+    "pair_whitelist": [
+    "DATA/USDT:USDT",
+    "STX/USDT:USDT",
+    "10000COQ/USDT:USDT",
+    "10000LADYS/USDT:USDT",
+    "1000IQ50/USDT:USDT",
+    "GPT/USDT:USDT",
+    "CFX/USDT:USDT",
+    "ETHFI/USDT:USDT",
+    "XMR/USDT:USDT",
+    "AEVO/USDT:USDT",
+    "SKL/USDT:USDT",
+    "FRONT/USDT:USDT",
+    "GFT/USDT:USDT",
+    "AGIX/USDT:USDT",
+    "DUSK/USDT:USDT",
+    "10000000AIDOGE/USDT:USDT",
+    "EDU/USDT:USDT",
+    "CHR/USDT:USDT",
+    "APT/USDT:USDT",
+    "ZETA/USDT:USDT",
+    "ID/USDT:USDT",
+    "RNDR/USDT:USDT",
+    "TRX/USDT:USDT",
+    "QNT/USDT:USDT",
+    "10000NFT/USDT:USDT",
+    "TOKEN/USDT:USDT",
+    "1000PEPE/USDT:USDT",
+    "FORTH/USDT:USDT",
+    "CVC/USDT:USDT"
+]
+    },
+    "pairlists": [
+        {
+            "method": "StaticPairList",
+            "number_assets": 30
+        }
+    ],
+    "api_server": {
+        "enabled": true,
+        "listen_ip_address": "0.0.0.0",
+        "listen_port": 8080,
+        "verbosity": "error",
+        "enable_openapi": false,
+        "jwt_secret_key": "",
+        "ws_token": "",
+        "CORS_origins": [],
+        "username": "freqtrade",
+        "password": "freqtrade"
+    },
 
+    "bot_name": "freqtrade",
+    "initial_state": "running",
+    "force_entry_enable": true,
+    "internals": {
+        "process_throttle_secs": 5
+    }
+}
