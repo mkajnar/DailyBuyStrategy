@@ -1,0 +1,46 @@
+{
+  "strategy_name": "DailyBuyStrategy3_4_JPA",
+  "params": {
+    "roi": {
+      "0": 0.03
+    },
+    "stoploss": {
+      "stoploss": -0.5
+    },
+    "trailing": {
+      "trailing_stop": true,
+      "trailing_stop_positive": 0.003,
+      "trailing_stop_positive_offset": 0.008,
+      "trailing_only_offset_is_reached": true
+    },
+    "max_open_trades": {
+      "max_open_trades": 10
+    },
+    "buy": {
+      "a_vol_coef": 1,
+      "buy_ema_long": 50,
+      "buy_ema_short": 10,
+      "buy_macd": 0.0,
+      "buy_rsi": 55,
+      "dca_threshold": 0.03,
+      "swing_buffer": 0.03,
+      "swing_min_periods": 10,
+      "swing_window": 50,
+      "volume_dca_int": 7,
+      "dca_candles_modulo": 3,
+      "lookback_length": 17,
+      "lower_trigger_level": -79,
+      "upper_trigger_level": 50
+    },
+    "sell": {
+      "new_sl_coef": 0.75,
+      "sell_ema_long": 50,
+      "sell_ema_short": 10,
+      "sell_macd": -0.005,
+      "sell_rsi": 70
+    },
+    "protection": {}
+  },
+  "ft_stratparam_v": 1,
+  "export_time": "2024-05-07 00:19:20.860630+00:00"
+}
